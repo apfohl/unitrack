@@ -22,6 +22,10 @@ type model struct {
 	timerValue    time.Duration
 	pauseTime     time.Time
 	totalPaused   time.Duration
+
+	history       []string
+	historyIndex  int
+	historyNav    bool
 }
 
 func (m model) Init() tea.Cmd {
@@ -31,10 +35,47 @@ func (m model) Init() tea.Cmd {
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// navigation for history when not running a timer
 		switch msg.String() {
+		case "up":
+			if !m.timerActive && len(m.history) > 0 {
+				if !m.historyNav {
+					m.historyIndex = len(m.history) - 1
+					m.historyNav = true
+				} else if m.historyIndex > 0 {
+					m.historyIndex--
+				}
+				m.input.SetValue(m.history[m.historyIndex])
+			}
+			return m, nil
+		case "down":
+			if !m.timerActive && m.historyNav && len(m.history) > 0 {
+				if m.historyIndex < len(m.history)-1 {
+					m.historyIndex++
+					m.input.SetValue(m.history[m.historyIndex])
+				} else {
+					m.input.SetValue("")
+					m.historyNav = false
+				}
+			}
+			return m, nil
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "enter":
+			if val := m.input.Value(); !m.timerActive && val != "" {
+				// add unique, non-empty to history if new
+				found := false
+				for _, h := range m.history {
+					if h == val {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.history = append(m.history, val)
+				}
+				m.historyNav = false
+			}
 			m.timerActive = true
 			m.timerPaused = false
 			m.timerStart = time.Now()
@@ -100,7 +141,7 @@ func (m model) View() string {
 	if m.message != "" {
 		view += m.message + "\n"
 	}
-	view += "Press q or ctrl+c to quit. 's': submit, 'p': pause, 'r': resume, 'c': cancel."
+	view += "Press q or ctrl+c to quit. 's': submit, 'p': pause, 'r': resume, 'c': cancel. Up/down to cycle history."
 	return view
 }
 
