@@ -17,8 +17,11 @@ type model struct {
 	input         textinput.Model
 	message       string
 	timerActive   bool
+	timerPaused   bool
 	timerStart    time.Time
 	timerValue    time.Duration
+	pauseTime     time.Time
+	totalPaused   time.Duration
 }
 
 func (m model) Init() tea.Cmd {
@@ -33,12 +36,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "enter":
 			m.timerActive = true
+			m.timerPaused = false
 			m.timerStart = time.Now()
 			m.timerValue = 0
+			m.totalPaused = 0
 			m.message = ""
 			return m, tickTimer()
+		case "p":
+			if m.timerActive && !m.timerPaused {
+				m.timerPaused = true
+				m.pauseTime = time.Now()
+				m.message = "Paused. Press 'r' to resume."
+				return m, nil
+			}
+		case "r":
+			if m.timerActive && m.timerPaused {
+				m.timerPaused = false
+				m.totalPaused += time.Since(m.pauseTime)
+				m.message = "Resumed."
+				return m, tickTimer()
+			}
 		case "s":
-			if m.timerActive {
+			if m.timerActive && !m.timerPaused {
 				ceiled := ceilToQuarter(m.timerValue)
 				issueId := m.input.Value()
 				msg := fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
@@ -49,10 +68,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.input.Focus()
 				return m, textinput.Blink
 			}
+		case "c":
+			if m.timerActive {
+				m.timerActive = false
+				m.timerPaused = false
+				m.message = "Timer cancelled."
+				m.input.SetValue("")
+				m.input.Focus()
+				return m, textinput.Blink
+			}
 		}
 	case timerMsg:
-		if m.timerActive {
-			m.timerValue = time.Since(m.timerStart)
+		if m.timerActive && !m.timerPaused {
+			m.timerValue = time.Since(m.timerStart) - m.totalPaused
 			return m, tickTimer()
 		}
 	}
@@ -65,11 +93,14 @@ func (m model) View() string {
 	view := "Enter issue ID: " + m.input.View() + "\n"
 	if m.timerActive {
 		view += fmt.Sprintf("Timer: %s\n", fmtDuration(m.timerValue))
+		if m.timerPaused {
+			view += "[PAUSED]\n"
+		}
 	}
 	if m.message != "" {
 		view += m.message + "\n"
 	}
-	view += "Press q or ctrl+c to quit. Press s to submit time."
+	view += "Press q or ctrl+c to quit. 's': submit, 'p': pause, 'r': resume, 'c': cancel."
 	return view
 }
 
@@ -103,13 +134,13 @@ func postLinearComment(issueId, value string) {
 	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
 	b, err := os.ReadFile(cfgPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to read config: %v\n", err)
+		logError(fmt.Sprintf("Failed to read config: %v", err))
 		return
 	}
 	var cfg apiConfig
 	err = json.Unmarshal(b, &cfg)
 	if err != nil || cfg.APIKey == "" {
-		fmt.Fprintf(os.Stderr, "Failed to parse config or missing key: %v\n", err)
+		logError(fmt.Sprintf("Failed to parse config or missing key: %v", err))
 		return
 	}
 	client := resty.New()
@@ -119,6 +150,7 @@ func postLinearComment(issueId, value string) {
 		SetHeader("Content-Type", "application/json").
 		SetBody(map[string]string{"query": mutation}).
 		Post("https://api.linear.app/graphql")
+	logError(fmt.Sprintf("Linear API response status: %d, response: %s", resp.StatusCode(), resp.String()))
 	if err != nil {
 		logError(fmt.Sprintf("Linear API error: %v", err))
 		return
@@ -129,7 +161,8 @@ func postLinearComment(issueId, value string) {
 }
 
 func logError(msg string) {
-	f, ferr := os.OpenFile("unitrack_error.log", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logPath := os.Getenv("HOME") + "/.config/unitrack/unitrack_error.log"
+	f, ferr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if ferr != nil {
 		fmt.Fprintf(os.Stderr, "Could not log error: %v\nOriginal error: %s\n", ferr, msg)
 		return
