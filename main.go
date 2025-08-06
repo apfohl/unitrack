@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"time"
 	"strings"
+	"time"
+
 	tea "github.com/charmbracelet/bubbletea"
 	textinput "github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/lipgloss"
 	resty "github.com/go-resty/resty/v2"
 )
 
@@ -27,6 +29,16 @@ type model struct {
 	historyIndex  int
 	historyNav    bool
 }
+
+// Lipgloss styles
+var (
+	headerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Padding(0, 1)
+	inputStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("0")).Padding(0, 1)
+	timerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	pausedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
+	msgStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Italic(true)
+	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
+)
 
 func loadHistory() []string {
 	path := os.Getenv("HOME") + "/.config/unitrack/history"
@@ -48,7 +60,6 @@ func loadHistory() []string {
 func saveHistory(hist []string) {
 	path := os.Getenv("HOME") + "/.config/unitrack/history"
 	_ = os.MkdirAll(os.Getenv("HOME")+"/.config/unitrack", 0700)
-	// write unique vals only, most recent last
 	uniq := make(map[string]bool)
 	var order []string
 	for _, h := range hist {
@@ -95,7 +106,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "q":
 			return m, tea.Quit
 		case "enter":
-			if val := m.input.Value(); !m.timerActive && val != "" {
+			val := m.input.Value()
+			if !m.timerActive && val != "" {
 				// add unique, non-empty to history if new
 				found := false
 				for _, h := range m.history {
@@ -109,14 +121,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					saveHistory(m.history)
 				}
 				m.historyNav = false
+				m.timerActive = true
+				m.timerPaused = false
+				m.timerStart = time.Now()
+				m.timerValue = 0
+				m.totalPaused = 0
+				m.message = ""
+				return m, tickTimer()
 			}
-			m.timerActive = true
-			m.timerPaused = false
-			m.timerStart = time.Now()
-			m.timerValue = 0
-			m.totalPaused = 0
-			m.message = ""
-			return m, tickTimer()
+			if val == "" && !m.timerActive {
+				m.message = "Issue ID cannot be empty."
+				return m, nil
+			}
 		case "p":
 			if m.timerActive && !m.timerPaused {
 				m.timerPaused = true
@@ -168,17 +184,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m model) View() string {
-	view := "Enter issue ID: " + m.input.View() + "\n"
+	view := headerStyle.Render("unitrack - Linear time tracker") + "\n\n"
+	view += inputStyle.Render("Issue ID: ") + m.input.View() + "\n"
 	if m.timerActive {
-		view += fmt.Sprintf("Timer: %s\n", fmtDuration(m.timerValue))
+		view += timerStyle.Render("Timer: "+fmtDuration(m.timerValue)) + "\n"
 		if m.timerPaused {
-			view += "[PAUSED]\n"
+			view += pausedStyle.Render("[PAUSED]") + "\n"
 		}
 	}
 	if m.message != "" {
-		view += m.message + "\n"
+		view += msgStyle.Render(m.message) + "\n"
 	}
-	view += "Press q or ctrl+c to quit. 's': submit, 'p': pause, 'r': resume, 'c': cancel. Up/down to cycle history."
+	view += helpStyle.Render("'q' quit  'enter' start  's' submit  'p' pause  'r' resume  'c' cancel  ↑/↓ history")
 	return view
 }
 
