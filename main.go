@@ -132,12 +132,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tickTimer()
 			}
 		case "s":
-			if m.timerActive && !m.timerPaused {
+			if m.timerActive {
 				ceiled := ceilToQuarter(m.timerValue)
 				issueId := m.input.Value()
 				msg := fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
 				m.message = msg
 				m.timerActive = false
+				m.timerPaused = false
+				logEntry := fmt.Sprintf("SUBMIT ISSUE: %s TIME: %s CEIL: %s", issueId, fmtDuration(m.timerValue), ceiled)
+				logError(logEntry)
 				go postLinearComment(issueId, ceiled)
 				m.input.SetValue("")
 				m.input.Focus()
@@ -198,7 +201,7 @@ func ceilToQuarter(d time.Duration) string {
 	quar := int((tm+14.999)/15) * 15 // ceil to next 15
 	h := quar / 60
 	m := quar % 60
-	return fmt.Sprintf("%02d:%02d", h, m)
+	return fmt.Sprintf("%d:%02d", h, m)
 }
 
 type apiConfig struct {
@@ -236,7 +239,7 @@ func postLinearComment(issueId, value string) {
 }
 
 func logError(msg string) {
-	logPath := os.Getenv("HOME") + "/.config/unitrack/unitrack_error.log"
+	logPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.log"
 	f, ferr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if ferr != nil {
 		fmt.Fprintf(os.Stderr, "Could not log error: %v\nOriginal error: %s\n", ferr, msg)
