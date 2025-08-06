@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 	"time"
-
+	"strings"
 	tea "github.com/charmbracelet/bubbletea"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	resty "github.com/go-resty/resty/v2"
@@ -28,7 +28,40 @@ type model struct {
 	historyNav    bool
 }
 
+func loadHistory() []string {
+	path := os.Getenv("HOME") + "/.config/unitrack/history"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	lines := strings.Split(string(b), "\n")
+	var out []string
+	for _, l := range lines {
+		l = strings.TrimSpace(l)
+		if l != "" {
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+func saveHistory(hist []string) {
+	path := os.Getenv("HOME") + "/.config/unitrack/history"
+	_ = os.MkdirAll(os.Getenv("HOME")+"/.config/unitrack", 0700)
+	// write unique vals only, most recent last
+	uniq := make(map[string]bool)
+	var order []string
+	for _, h := range hist {
+		if h != "" && !uniq[h] {
+			uniq[h] = true
+			order = append(order, h)
+		}
+	}
+	os.WriteFile(path, []byte(strings.Join(order, "\n")), 0600)
+}
+
 func (m model) Init() tea.Cmd {
+	m.history = loadHistory()
 	return textinput.Blink
 }
 
@@ -73,6 +106,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if !found {
 					m.history = append(m.history, val)
+					saveHistory(m.history)
 				}
 				m.historyNav = false
 			}
@@ -217,11 +251,11 @@ func main() {
 	input.Placeholder = "Issue ID"
 	input.CharLimit = 20
 	input.Focus()
-
 	m := model{
 		input:   input,
 		message: "",
 	}
+	m.history = loadHistory()
 	p := tea.NewProgram(m)
 	if err := p.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
