@@ -1,0 +1,15 @@
+# Binaries
+unitrack
+*.exe
+*.out
+*.test
+
+# Logs
+unitrack_error.log
+
+# Config
+/.crush/
+/.config/
+
+# OS files
+.DS_Store
