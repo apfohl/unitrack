@@ -3,47 +3,48 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	textinput "github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	resty "github.com/go-resty/resty/v2"
 	"os"
 	"strings"
 	"time"
-	tea "github.com/charmbracelet/bubbletea"
-	textinput "github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/lipgloss"
-	resty "github.com/go-resty/resty/v2"
 )
 
 type timerMsg time.Duration
 
 type screen int
+
 const (
 	screenMainApp screen = iota
 	screenConfirmCancel
 )
 
 type model struct {
-	input         textinput.Model
-	message       string
-	timerActive   bool
-	timerPaused   bool
-	timerStart    time.Time
-	timerValue    time.Duration
-	pauseTime     time.Time
-	totalPaused   time.Duration
+	input       textinput.Model
+	message     string
+	timerActive bool
+	timerPaused bool
+	timerStart  time.Time
+	timerValue  time.Duration
+	pauseTime   time.Time
+	totalPaused time.Duration
 
-	history       []string
-	historyIndex  int
-	historyNav    bool
-	screen        screen
+	history      []string
+	historyIndex int
+	historyNav   bool
+	screen       screen
 }
 
 var (
-	headerStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Padding(0, 1)
-	inputStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("0")).Padding(0, 1)
-	timerStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	pausedStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-	msgStyle      = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Italic(true)
-	helpStyle     = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
-	promptStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
+	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Padding(0, 1)
+	inputStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("0")).Padding(0, 1)
+	timerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
+	pausedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
+	msgStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Italic(true)
+	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
+	promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
 )
 
 func (m model) Init() tea.Cmd {
@@ -84,18 +85,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			case "enter":
 				val := m.input.Value()
+				fullId := val
+				cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
+				b, err := os.ReadFile(cfgPath)
+				prefix := "UE"
+				if err == nil {
+					var cfg apiConfig
+					if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+						prefix = cfg.Prefix
+					}
+				}
+				if !strings.HasPrefix(val, prefix+"-") && val != "" {
+					fullId = prefix + "-" + val
+				}
 				if !m.timerActive && val != "" {
 					found := false
 					for _, h := range m.history {
-						if h == val {
+						if h == fullId {
 							found = true
 							break
 						}
 					}
 					if !found {
-						m.history = append(m.history, val)
+						m.history = append(m.history, fullId)
 						saveHistory(m.history)
 					}
+					m.input.SetValue(fullId)
 					m.historyNav = false
 					m.timerActive = true
 					m.timerPaused = false
@@ -127,6 +142,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.timerActive {
 					ceiled := ceilToQuarter(m.timerValue)
 					issueId := m.input.Value()
+					cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
+					b, err := os.ReadFile(cfgPath)
+					prefix := "UE"
+					if err == nil {
+						var cfg apiConfig
+						if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+							prefix = cfg.Prefix
+						}
+					}
+					if !strings.HasPrefix(issueId, prefix+"-") && issueId != "" {
+						issueId = prefix + "-" + issueId
+					}
 					msg := fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
 					m.message = msg
 					m.timerActive = false
@@ -222,6 +249,7 @@ func ceilToQuarter(d time.Duration) string {
 
 type apiConfig struct {
 	APIKey string `json:"api_key"`
+	Prefix string `json:"prefix"`
 }
 
 func postLinearComment(issueId, value string) {
@@ -297,8 +325,17 @@ func saveHistory(hist []string) {
 }
 
 func main() {
+	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
+	b, err := os.ReadFile(cfgPath)
+	prefix := "UE"
+	if err == nil {
+		var cfg apiConfig
+		if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+			prefix = cfg.Prefix
+		}
+	}
 	input := textinput.New()
-	input.Placeholder = "Issue ID"
+	input.Placeholder = prefix + "-1234"
 	input.CharLimit = 20
 	input.Focus()
 	m := model{
