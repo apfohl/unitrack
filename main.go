@@ -3,13 +3,14 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"strings"
+	"time"
+
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	resty "github.com/go-resty/resty/v2"
-	"os"
-	"strings"
-	"time"
 )
 
 type timerMsg time.Duration
@@ -19,6 +20,7 @@ type screen int
 const (
 	screenMainApp screen = iota
 	screenConfirmCancel
+	screenRecoverTimer
 )
 
 type model struct {
@@ -35,6 +37,11 @@ type model struct {
 	historyIndex int
 	historyNav   bool
 	screen       screen
+
+	// For timer recovery
+	savedTimerIssue string
+	savedTimerValue time.Duration
+	lastSaveTime    time.Time
 }
 
 var (
@@ -99,6 +106,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					fullId = prefix + "-" + val
 				}
 				if !m.timerActive && val != "" {
+					// Check for saved timer
+					if saved := loadSavedTimer(fullId); saved != nil {
+						m.savedTimerIssue = fullId
+						m.savedTimerValue = saved.Duration
+						m.screen = screenRecoverTimer
+						return m, nil
+					}
+
 					found := false
 					for _, h := range m.history {
 						if h == fullId {
@@ -118,6 +133,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timerValue = 0
 					m.totalPaused = 0
 					m.message = ""
+					m.lastSaveTime = time.Now()
 					return m, tickTimer()
 				}
 				if val == "" && !m.timerActive {
@@ -160,6 +176,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timerPaused = false
 					logEntry := fmt.Sprintf("SUBMIT ISSUE: %s TIME: %s CEIL: %s", issueId, fmtDuration(m.timerValue), ceiled)
 					logError(logEntry)
+					deleteSavedTimer(issueId)
 					go postLinearComment(issueId, ceiled)
 					m.input.SetValue("")
 					m.input.Focus()
@@ -174,6 +191,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case timerMsg:
 			if m.timerActive && !m.timerPaused {
 				m.timerValue = time.Since(m.timerStart) - m.totalPaused
+				// Auto-save every minute
+				if time.Since(m.lastSaveTime) >= time.Minute {
+					issueId := m.input.Value()
+					saveTimer(issueId, m.timerValue, m.timerStart, m.totalPaused)
+					m.lastSaveTime = time.Now()
+				}
 				return m, tickTimer()
 			}
 		}
@@ -184,6 +207,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			if msg.String() == "y" {
+				issueId := m.input.Value()
+				deleteSavedTimer(issueId)
 				m.timerActive = false
 				m.timerPaused = false
 				m.screen = screenMainApp
@@ -194,6 +219,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if msg.String() == "n" {
 				m.screen = screenMainApp
 				m.message = "Cancel aborted."
+				return m, tickTimer()
+			}
+		}
+		return m, nil
+	case screenRecoverTimer:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			if msg.String() == "y" {
+				// Continue with saved timer
+				m.input.SetValue(m.savedTimerIssue)
+				m.timerActive = true
+				m.timerPaused = false
+				m.timerStart = time.Now().Add(-m.savedTimerValue)
+				m.timerValue = m.savedTimerValue
+				m.totalPaused = 0
+				m.message = fmt.Sprintf("Resumed timer at %s", fmtDuration(m.savedTimerValue))
+				m.screen = screenMainApp
+				m.lastSaveTime = time.Now()
+				return m, tickTimer()
+			} else if msg.String() == "n" {
+				// Discard and start fresh
+				deleteSavedTimer(m.savedTimerIssue)
+				m.input.SetValue(m.savedTimerIssue)
+				m.timerActive = true
+				m.timerPaused = false
+				m.timerStart = time.Now()
+				m.timerValue = 0
+				m.totalPaused = 0
+				m.message = "Starting fresh timer."
+				m.screen = screenMainApp
+				m.lastSaveTime = time.Now()
 				return m, tickTimer()
 			}
 		}
@@ -220,6 +276,10 @@ func (m model) View() string {
 		return view
 	case screenConfirmCancel:
 		prompt := promptStyle.Render("Cancel timer? Press y to confirm, n to abort.") + "\n"
+		return prompt
+	case screenRecoverTimer:
+		prompt := promptStyle.Render(fmt.Sprintf("Found saved timer for %s at %s.", m.savedTimerIssue, fmtDuration(m.savedTimerValue))) + "\n"
+		prompt += promptStyle.Render("Continue from saved time? Press y to continue, n to start fresh.") + "\n"
 		return prompt
 	}
 	return ""
@@ -248,8 +308,9 @@ func ceilToQuarter(d time.Duration) string {
 }
 
 type apiConfig struct {
-	APIKey string `json:"api_key"`
-	Prefix string `json:"prefix"`
+	APIKey          string `json:"api_key"`
+	Prefix          string `json:"prefix"`
+	TimerExpireDays int    `json:"timer_expire_days,omitempty"`
 }
 
 func postLinearComment(issueId, value string) {
@@ -322,6 +383,74 @@ func saveHistory(hist []string) {
 		}
 	}
 	os.WriteFile(path, []byte(strings.Join(order, "\n")), 0600)
+}
+
+type savedTimer struct {
+	IssueID     string        `json:"issue_id"`
+	Duration    time.Duration `json:"duration"`
+	StartTime   time.Time     `json:"start_time"`
+	TotalPaused time.Duration `json:"total_paused"`
+	SavedAt     time.Time     `json:"saved_at"`
+}
+
+func saveTimer(issueID string, duration time.Duration, startTime time.Time, totalPaused time.Duration) {
+	saved := savedTimer{
+		IssueID:     issueID,
+		Duration:    duration,
+		StartTime:   startTime,
+		TotalPaused: totalPaused,
+		SavedAt:     time.Now(),
+	}
+
+	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
+	b, err := json.MarshalIndent(saved, "", "  ")
+	if err != nil {
+		logError(fmt.Sprintf("Failed to marshal saved timer: %v", err))
+		return
+	}
+
+	err = os.WriteFile(path, b, 0600)
+	if err != nil {
+		logError(fmt.Sprintf("Failed to save timer: %v", err))
+	}
+}
+
+func loadSavedTimer(issueID string) *savedTimer {
+	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+
+	var saved savedTimer
+	err = json.Unmarshal(b, &saved)
+	if err != nil {
+		logError(fmt.Sprintf("Failed to unmarshal saved timer: %v", err))
+		return nil
+	}
+
+	// Check if saved timer is too old (default: 5 days)
+	expireDays := 5
+	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
+	b, err = os.ReadFile(cfgPath)
+	if err == nil {
+		var cfg apiConfig
+		if json.Unmarshal(b, &cfg) == nil && cfg.TimerExpireDays > 0 {
+			expireDays = cfg.TimerExpireDays
+		}
+	}
+
+	if time.Since(saved.SavedAt) > time.Duration(expireDays)*24*time.Hour {
+		deleteSavedTimer(issueID)
+		return nil
+	}
+
+	return &saved
+}
+
+func deleteSavedTimer(issueID string) {
+	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
+	os.Remove(path)
 }
 
 func main() {

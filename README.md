@@ -10,9 +10,14 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
 4. Install: `go install .` (the binary will be available as `unitrack` in your `$GOPATH/bin`)
 5. Create `~/.config/unitrack/unitrack.json`:
    ```json
-   { "api_key": "YOUR_LINEAR_API_KEY", "prefix": "UE" }
+   {
+     "api_key": "YOUR_LINEAR_API_KEY",
+     "prefix": "UE",
+     "timer_expire_days": 5
+   }
    ```
    - `prefix` configures the project key in issue IDs (e.g. "UE-1234").
+   - `timer_expire_days` (optional) sets how many days before saved timers expire (default: 5).
 
 ## Usage
 
@@ -27,6 +32,18 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
 - Previous full issue IDs are saved in history; cycle them with `Up`/`Down` arrows.
 - Quit with `q` or `ctrl+c`.
 - All logs/output are in `$HOME/.config/unitrack/unitrack.log`.
+
+### Auto-save & Recovery
+
+- The timer state is automatically saved every minute to `~/.config/unitrack/saved_timer_<issue_id>.json`
+- If you start tracking an issue that has a saved timer, you'll be prompted to either:
+  - Continue from the saved time (press `y`)
+  - Start fresh and discard the saved time (press `n`)
+- Saved timers are automatically deleted when:
+  - You submit the time to Linear
+  - You cancel a timer
+  - The saved timer is older than the configured expiration (default: 5 days)
+- This feature helps recover from crashes or accidental closures
 
 ### Notes
 - Customize the prefix for issue IDs in the config (e.g. "UI" for UI-1234).
