@@ -18,6 +18,6 @@ jobs:
       - name: Build macOS binary
         run: GOOS=darwin GOARCH=amd64 go build -o unitrack
       - name: Upload release asset
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v1
         with:
           files: unitrack
