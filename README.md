@@ -7,7 +7,7 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
 1. Install Go (>=1.20), and ensure `$GOPATH/bin` (`~/go/bin` by default) is in your system `$PATH`.
 2. Clone this repo
 3. Run: `go mod tidy`
-4. Install: `go install .` (the binary will be available as `unitrack` in your `$GOPATH/bin`)
+4. Install: `go install github.com/apfohl-uninow/unitrack@latest` (binary available as `unitrack` in your `$GOPATH/bin`)
 5. Create `~/.config/unitrack/unitrack.json`:
    ```json
    {
@@ -48,3 +48,19 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
 ### Notes
 - Customize the prefix for issue IDs in the config (e.g. "UI" for UI-1234).
 - History, config, and logs are created/loaded automatically per session.
+
+## CI / Releases
+
+- **Build/test on PRs and push to main is automatic via GitHub Actions.**
+- **Tagged versions like `v0.1.0` trigger a macOS build and release binary upload to repo assets.**
+- **Install stable releases with:**
+
+  ```shell
+  go install github.com/apfohl-uninow/unitrack@latest
+  ```
+
+- **Or install by specific tag:**
+
+  ```shell
+  go install github.com/apfohl-uninow/unitrack@v0.1.0
+  ```

@@ -1,0 +1,23 @@
+name: Release
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+jobs:
+  release:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install dependencies
+        run: go mod tidy
+      - name: Build macOS binary
+        run: GOOS=darwin GOARCH=amd64 go build -o unitrack
+      - name: Upload release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: unitrack
