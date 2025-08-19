@@ -2,13 +2,24 @@
 
 A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter hour and posting as a comment via Linear's GraphQL API.
 
+## Install
+
+1. **Recommended:** Install via Go:
+   ```shell
+   go install github.com/apfohl-uninow/unitrack@latest
+   ```
+   The binary will be available as `unitrack` in your `$GOPATH/bin` (usually `~/go/bin`).
+
+2. **Manual install:**
+   - Clone this repo
+   - Run `go mod tidy`
+   - Build: `go build .`
+   - Binary will be available as `./unitrack`
+
 ## Setup
 
-1. Install Go (>=1.20), and ensure `$GOPATH/bin` (`~/go/bin` by default) is in your system `$PATH`.
-2. Clone this repo
-3. Run: `go mod tidy`
-4. Install: `go install github.com/apfohl-uninow/unitrack@latest` (binary available as `unitrack` in your `$GOPATH/bin`)
-5. Create `~/.config/unitrack/unitrack.json`:
+1. Ensure Go (>=1.20) is installed, and `$GOPATH/bin` (`~/go/bin` by default) is in your system `$PATH`.
+2. Create config file at `~/.config/unitrack/unitrack.json`:
    ```json
    {
      "api_key": "YOUR_LINEAR_API_KEY",
