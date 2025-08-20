@@ -18,7 +18,7 @@ jobs:
       - name: Set version
         run: echo "version=${GITHUB_REF#refs/*/}" >> "$GITHUB_ENV"
       - name: Build macOS binary
-        run: GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -extldflags "-static" -X main.version=${{ env.version }} -o unitrack
+        run: GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w -extldflags "-static" -X main.version=${{ env.version }}" -o unitrack
       - name: Upload release asset
         uses: softprops/action-gh-release@v1
         with:
