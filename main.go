@@ -13,6 +13,8 @@ import (
 	resty "github.com/go-resty/resty/v2"
 )
 
+var version = "unknown"
+
 type timerMsg time.Duration
 
 type screen int
@@ -454,6 +456,11 @@ func deleteSavedTimer(issueID string) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--version" {
+		fmt.Printf("unitrack %s\n", version)
+		return
+	}
+
 	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
 	b, err := os.ReadFile(cfgPath)
 	prefix := "UE"

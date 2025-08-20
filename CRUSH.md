@@ -6,6 +6,7 @@ Language: Go (Bubble Tea TUI)
 ## Build/Test/Lint Commands
 - Install: `go mod tidy`
 - Build: `go build .`
+- Build with version: `go build -ldflags "-X main.version=v1.1.0" .`
 - Run: `./unitrack`
 - Run tests: `go test ./...`
 - Run single test: `go test -run <TestName> ./...`
@@ -30,6 +31,7 @@ Language: Go (Bubble Tea TUI)
 - API key is loaded from `$HOME/.config/unitrack/unitrack.json`.
 - Configuration, logs, and binary are all `.gitignore`'d.
 - Bubble Tea, Bubbles, Resty libraries in use. No comments in code unless documenting exported declarations.
+- `--version` flag shows program name and version (e.g., "unitrack v1.1.0" or "unitrack unknown" for local builds).
 
 ## Misc
 - `.crush/`, `.config/`, `unitrack_error.log`, and all OS/binary artifacts are `.gitignore`'d.

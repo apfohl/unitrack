@@ -16,7 +16,7 @@ jobs:
       - name: Install dependencies
         run: go mod tidy
       - name: Build macOS binary
-        run: GOOS=darwin GOARCH=amd64 go build -o unitrack
+        run: GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.version=${GITHUB_REF#refs/tags/}" -o unitrack
       - name: Upload release asset
         uses: softprops/action-gh-release@v1
         with:
