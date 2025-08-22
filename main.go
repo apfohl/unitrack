@@ -18,8 +18,10 @@ import (
 var version = "unknown"
 
 var (
-	colorRed    = lipgloss.Color("131") // muted red
-	colorYellow = lipgloss.Color("143") // muted yellow
+	colorRed       = lipgloss.Color("131") // muted red
+	colorYellow    = lipgloss.Color("143") // muted yellow
+	colorLightGray = lipgloss.Color("250") // lighter gray for keys
+	colorGray      = lipgloss.Color("245") // gray for descriptions
 
 	logoStyle  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 2)
 	headerBar  = lipgloss.NewStyle().Bold(true).Padding(0, 1)
@@ -129,6 +131,12 @@ func (m model) Init() tea.Cmd {
 	m.history = loadHistory()
 	m.screen = screenMainApp
 	m.help = help.New()
+	m.help.Styles.ShortKey = lipgloss.NewStyle().Foreground(colorLightGray)
+	m.help.Styles.ShortDesc = lipgloss.NewStyle().Foreground(colorGray)
+	m.help.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(colorGray)
+	m.help.Styles.FullKey = lipgloss.NewStyle().Foreground(colorLightGray)
+	m.help.Styles.FullDesc = lipgloss.NewStyle().Foreground(colorGray)
+	m.help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(colorGray)
 	m.keys = keys
 	return textinput.Blink
 }
@@ -163,8 +171,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "ctrl+c", "q":
 				return m, tea.Quit
-			case "?":
+			case "?": 
 				m.help.ShowAll = !m.help.ShowAll
+				return m, nil
 			case "enter":
 				val := m.input.Value()
 				fullId := val
@@ -548,10 +557,17 @@ func main() {
 	input.Placeholder = prefix + "-1234"
 	input.CharLimit = 20
 	input.Focus()
+	helpModel := help.New()
+	helpModel.Styles.ShortKey = lipgloss.NewStyle().Foreground(colorLightGray)
+	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(colorGray)
+	helpModel.Styles.ShortSeparator = lipgloss.NewStyle().Foreground(colorGray)
+	helpModel.Styles.FullKey = lipgloss.NewStyle().Foreground(colorLightGray)
+	helpModel.Styles.FullDesc = lipgloss.NewStyle().Foreground(colorGray)
+	helpModel.Styles.FullSeparator = lipgloss.NewStyle().Foreground(colorGray)
 	m := model{
 		input:   input,
 		message: "",
-		help:    help.New(),
+		help:    helpModel,
 		keys:    keys,
 	}
 	m.history = loadHistory()
