@@ -23,9 +23,9 @@ var (
 	colorLightGray = lipgloss.Color("250") // lighter gray for keys
 	colorGray      = lipgloss.Color("245") // gray for descriptions
 
-	logoStyle  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 2)
-	headerBar  = lipgloss.NewStyle().Bold(true).Padding(0, 1)
-	inputBox   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder(), false, false, false, true).BorderForeground(colorYellow).Padding(0, 1)
+	logoStyle  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 1)
+	headerBar  = lipgloss.NewStyle().Bold(true).Padding(1, 1)
+	inputBox   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder(), false, false, false, true).BorderForeground(colorYellow)
 	inputLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
 	timerBox   = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Padding(0, 2).MarginRight(2)
 	pausedBox  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).Padding(0, 2)
@@ -55,7 +55,7 @@ type keyMap struct {
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Start, k.Submit, k.Pause, k.Resume, k.Cancel, k.Help, k.Quit}
+	return []key.Binding{k.Start, k.Submit, k.Help, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
@@ -100,7 +100,7 @@ var keys = keyMap{
 	),
 	Help: key.NewBinding(
 		key.WithKeys("?"),
-		key.WithHelp("?", "toggle help"),
+		key.WithHelp("?", "more"),
 	),
 }
 
@@ -171,7 +171,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "ctrl+c", "q":
 				return m, tea.Quit
-			case "?": 
+			case "?":
 				m.help.ShowAll = !m.help.ShowAll
 				return m, nil
 			case "enter":
@@ -342,6 +342,7 @@ func (m model) View() string {
 	case screenMainApp:
 		logo := logoStyle.Render("⏱ unitrack")
 		header := headerBar.Render("Linear time tracker")
+		titleLine := lipgloss.JoinHorizontal(lipgloss.Left, logo, header)
 		input := inputBox.Render(inputLabel.Render("Issue ID: ") + m.input.View())
 		var timer string
 		if m.timerActive {
@@ -356,9 +357,7 @@ func (m model) View() string {
 		}
 		helpView := m.help.View(m.keys)
 		return lipgloss.JoinVertical(lipgloss.Top,
-			logo,
-			header,
-			"",
+			titleLine,
 			input,
 			"",
 			timer+msg,
