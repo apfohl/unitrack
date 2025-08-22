@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-		textinput "github.com/charmbracelet/bubbles/textinput"
+	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	resty "github.com/go-resty/resty/v2"
@@ -16,11 +16,11 @@ import (
 var version = "unknown"
 
 var (
-	colorOrange = lipgloss.Color("166")    // muted orange
-	colorRed    = lipgloss.Color("131")    // muted red
-	colorYellow = lipgloss.Color("143")    // muted yellow
-	colorWhite  = lipgloss.Color("250")    // dim white
-	colorBlack  = lipgloss.Color("235")    // dark gray, subtle background
+	colorOrange = lipgloss.Color("166") // muted orange
+	colorRed    = lipgloss.Color("131") // muted red
+	colorYellow = lipgloss.Color("143") // muted yellow
+	colorWhite  = lipgloss.Color("250") // dim white
+	colorBlack  = lipgloss.Color("235") // dark gray, subtle background
 
 	logoStyle  = lipgloss.NewStyle().Background(colorRed).Foreground(colorWhite).Bold(true).Padding(1, 2)
 	headerBar  = lipgloss.NewStyle().Background(colorOrange).Foreground(colorBlack).Bold(true).Padding(0, 3)
@@ -56,7 +56,6 @@ type model struct {
 	historyIndex int
 	historyNav   bool
 	screen       screen
-
 
 	// For timer recovery
 	savedTimerIssue string
@@ -234,7 +233,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			if msg.String() == "y" {
-				m.input.SetValue(m.savedTimerIssue)
+				// m.input.SetValue(m.savedTimerIssue) // avoid redundant assignment
 				m.timerActive = true
 				m.timerPaused = false
 				m.timerStart = time.Now().Add(-m.savedTimerValue)
@@ -246,7 +245,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tickTimer()
 			} else if msg.String() == "n" {
 				deleteSavedTimer(m.savedTimerIssue)
-				m.input.SetValue(m.savedTimerIssue)
+				// m.input.SetValue(m.savedTimerIssue) // avoid double-set on fresh start
 				m.timerActive = true
 				m.timerPaused = false
 				m.timerStart = time.Now()
