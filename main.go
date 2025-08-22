@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/help"
+	"github.com/charmbracelet/bubbles/key"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -16,20 +18,16 @@ import (
 var version = "unknown"
 
 var (
-	colorOrange = lipgloss.Color("166") // muted orange
 	colorRed    = lipgloss.Color("131") // muted red
 	colorYellow = lipgloss.Color("143") // muted yellow
-	colorWhite  = lipgloss.Color("250") // dim white
-	colorBlack  = lipgloss.Color("235") // dark gray, subtle background
 
-	logoStyle  = lipgloss.NewStyle().Background(colorRed).Foreground(colorWhite).Bold(true).Padding(1, 2)
-	headerBar  = lipgloss.NewStyle().Background(colorOrange).Foreground(colorBlack).Bold(true).Padding(0, 3)
+	logoStyle  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 2)
+	headerBar  = lipgloss.NewStyle().Bold(true).Padding(0, 1)
 	inputBox   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder(), false, false, false, true).BorderForeground(colorYellow).Padding(0, 1)
 	inputLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
-	timerBox   = lipgloss.NewStyle().Background(colorYellow).Foreground(colorBlack).Bold(true).Padding(0, 2).MarginRight(2)
-	pausedBox  = lipgloss.NewStyle().Foreground(colorBlack).Background(colorYellow).Bold(true).Underline(true).Padding(0, 2)
-	msgStyle   = lipgloss.NewStyle().Foreground(colorRed).Italic(true).Background(colorBlack)
-	footerBar  = lipgloss.NewStyle().Background(colorOrange).Foreground(colorBlack).Padding(0, 3)
+	timerBox   = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Padding(0, 2).MarginRight(2)
+	pausedBox  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).Padding(0, 2)
+	msgStyle   = lipgloss.NewStyle().Foreground(colorRed).Italic(true)
 )
 
 type timerMsg time.Duration
@@ -41,6 +39,68 @@ const (
 	screenConfirmCancel
 	screenRecoverTimer
 )
+
+type keyMap struct {
+	Quit   key.Binding
+	Start  key.Binding
+	Submit key.Binding
+	Pause  key.Binding
+	Resume key.Binding
+	Cancel key.Binding
+	Up     key.Binding
+	Down   key.Binding
+	Help   key.Binding
+}
+
+func (k keyMap) ShortHelp() []key.Binding {
+	return []key.Binding{k.Start, k.Submit, k.Pause, k.Resume, k.Cancel, k.Help, k.Quit}
+}
+
+func (k keyMap) FullHelp() [][]key.Binding {
+	return [][]key.Binding{
+		{k.Start, k.Submit, k.Pause, k.Resume},
+		{k.Cancel, k.Up, k.Down, k.Help, k.Quit},
+	}
+}
+
+var keys = keyMap{
+	Quit: key.NewBinding(
+		key.WithKeys("q", "ctrl+c"),
+		key.WithHelp("q", "quit"),
+	),
+	Start: key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "start timer"),
+	),
+	Submit: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "submit time"),
+	),
+	Pause: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "pause"),
+	),
+	Resume: key.NewBinding(
+		key.WithKeys("r"),
+		key.WithHelp("r", "resume"),
+	),
+	Cancel: key.NewBinding(
+		key.WithKeys("c"),
+		key.WithHelp("c", "cancel timer"),
+	),
+	Up: key.NewBinding(
+		key.WithKeys("up"),
+		key.WithHelp("↑", "history up"),
+	),
+	Down: key.NewBinding(
+		key.WithKeys("down"),
+		key.WithHelp("↓", "history down"),
+	),
+	Help: key.NewBinding(
+		key.WithKeys("?"),
+		key.WithHelp("?", "toggle help"),
+	),
+}
 
 type model struct {
 	input       textinput.Model
@@ -56,6 +116,8 @@ type model struct {
 	historyIndex int
 	historyNav   bool
 	screen       screen
+	help         help.Model
+	keys         keyMap
 
 	// For timer recovery
 	savedTimerIssue string
@@ -66,6 +128,8 @@ type model struct {
 func (m model) Init() tea.Cmd {
 	m.history = loadHistory()
 	m.screen = screenMainApp
+	m.help = help.New()
+	m.keys = keys
 	return textinput.Blink
 }
 
@@ -99,6 +163,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			case "ctrl+c", "q":
 				return m, tea.Quit
+			case "?":
+				m.help.ShowAll = !m.help.ShowAll
 			case "enter":
 				val := m.input.Value()
 				fullId := val
@@ -279,8 +345,7 @@ func (m model) View() string {
 		if m.message != "" {
 			msg = "\n" + msgStyle.Render(m.message)
 		}
-		controls := "'q' quit   'enter' start   's' submit   'p' pause   'r' resume   'c' cancel   ↑/↓ history"
-		footer := footerBar.Render(controls)
+		helpView := m.help.View(m.keys)
 		return lipgloss.JoinVertical(lipgloss.Top,
 			logo,
 			header,
@@ -289,7 +354,7 @@ func (m model) View() string {
 			"",
 			timer+msg,
 			"",
-			footer,
+			helpView,
 		)
 	case screenConfirmCancel:
 		prompt := headerBar.Render("Cancel timer? Press y to confirm, n to abort.")
@@ -486,6 +551,8 @@ func main() {
 	m := model{
 		input:   input,
 		message: "",
+		help:    help.New(),
+		keys:    keys,
 	}
 	m.history = loadHistory()
 	p := tea.NewProgram(m)
