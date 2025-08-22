@@ -218,6 +218,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timerActive = true
 					m.timerPaused = false
 					m.timerStart = time.Now()
+				m.input.Blur()
 					m.timerValue = 0
 					m.totalPaused = 0
 					m.message = ""
@@ -288,7 +289,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		var cmd tea.Cmd
-		m.input, cmd = m.input.Update(msg)
+		if !m.timerActive {
+			m.input, cmd = m.input.Update(msg)
+		}
 		m.spinner, _ = m.spinner.Update(msg)
 		return m, cmd
 	case screenConfirmCancel:
@@ -319,6 +322,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timerActive = true
 				m.timerPaused = false
 				m.timerStart = time.Now().Add(-m.savedTimerValue)
+				m.input.Blur()
 				m.timerValue = m.savedTimerValue
 				m.totalPaused = 0
 				m.message = fmt.Sprintf("Resumed timer at %s", fmtDuration(m.savedTimerValue))
@@ -331,6 +335,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timerActive = true
 				m.timerPaused = false
 				m.timerStart = time.Now()
+				m.input.Blur()
 				m.timerValue = 0
 				m.totalPaused = 0
 				m.message = "Starting fresh timer."
