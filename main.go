@@ -554,7 +554,8 @@ func main() {
 	}
 	input := textinput.New()
 	input.Placeholder = prefix + "-1234"
-	input.CharLimit = 20
+	input.CharLimit = 50
+	input.Width = 20
 	input.Focus()
 	helpModel := help.New()
 	helpModel.Styles.ShortKey = lipgloss.NewStyle().Foreground(colorLightGray)
