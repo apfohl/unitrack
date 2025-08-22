@@ -9,6 +9,7 @@ import (
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/spinner"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -20,6 +21,7 @@ var version = "unknown"
 var (
 	colorRed       = lipgloss.Color("131") // muted red
 	colorYellow    = lipgloss.Color("143") // muted yellow
+	colorOrange    = lipgloss.Color("166") // orange for spinner
 	colorLightGray = lipgloss.Color("250") // lighter gray for keys
 	colorGray      = lipgloss.Color("245") // gray for descriptions
 
@@ -120,6 +122,7 @@ type model struct {
 	screen       screen
 	help         help.Model
 	keys         keyMap
+	spinner      spinner.Model
 
 	// For timer recovery
 	savedTimerIssue string
@@ -138,6 +141,9 @@ func (m model) Init() tea.Cmd {
 	m.help.Styles.FullDesc = lipgloss.NewStyle().Foreground(colorGray)
 	m.help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(colorGray)
 	m.keys = keys
+	m.spinner = spinner.New()
+	m.spinner.Spinner = spinner.Dot
+	m.spinner.Style = lipgloss.NewStyle().Foreground(colorOrange)
 	return textinput.Blink
 }
 
@@ -216,7 +222,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.totalPaused = 0
 					m.message = ""
 					m.lastSaveTime = time.Now()
-					return m, tickTimer()
+					return m, tea.Batch(tickTimer(), m.spinner.Tick)
 				}
 				if val == "" && !m.timerActive {
 					m.message = "Issue ID cannot be empty."
@@ -234,7 +240,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timerPaused = false
 					m.totalPaused += time.Since(m.pauseTime)
 					m.message = "Resumed."
-					return m, tickTimer()
+					return m, tea.Batch(tickTimer(), m.spinner.Tick)
 				}
 			case "s":
 				if m.timerActive {
@@ -278,11 +284,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					saveTimer(issueId, m.timerValue, m.timerStart, m.totalPaused)
 					m.lastSaveTime = time.Now()
 				}
-				return m, tickTimer()
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
 		}
 		var cmd tea.Cmd
 		m.input, cmd = m.input.Update(msg)
+		m.spinner, _ = m.spinner.Update(msg)
 		return m, cmd
 	case screenConfirmCancel:
 		switch msg := msg.(type) {
@@ -300,7 +307,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if msg.String() == "n" {
 				m.screen = screenMainApp
 				m.message = "Cancel aborted."
-				return m, tickTimer()
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
 		}
 		return m, nil
@@ -317,7 +324,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = fmt.Sprintf("Resumed timer at %s", fmtDuration(m.savedTimerValue))
 				m.screen = screenMainApp
 				m.lastSaveTime = time.Now()
-				return m, tickTimer()
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			} else if msg.String() == "n" {
 				deleteSavedTimer(m.savedTimerIssue)
 				// m.input.SetValue(m.savedTimerIssue) // avoid double-set on fresh start
@@ -329,7 +336,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.message = "Starting fresh timer."
 				m.screen = screenMainApp
 				m.lastSaveTime = time.Now()
-				return m, tickTimer()
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
 		}
 		return m, nil
@@ -344,9 +351,15 @@ func (m model) View() string {
 		header := headerBar.Render("Linear time tracker")
 		titleLine := lipgloss.JoinHorizontal(lipgloss.Left, logo, header)
 		input := inputBox.Render(inputLabel.Render("Issue ID: ") + m.input.View())
+		input = lipgloss.NewStyle().PaddingLeft(1).Render(input)
 		var timer string
 		if m.timerActive {
-			timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
+			if !m.timerPaused {
+				spinnerWithPadding := lipgloss.NewStyle().PaddingLeft(1).Render(m.spinner.View())
+				timer = spinnerWithPadding + " " + timerBox.Render("Timer: "+fmtDuration(m.timerValue))
+			} else {
+				timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
+			}
 			if m.timerPaused {
 				timer += " " + pausedBox.Render("[PAUSED]")
 			}
@@ -564,11 +577,15 @@ func main() {
 	helpModel.Styles.FullKey = lipgloss.NewStyle().Foreground(colorLightGray)
 	helpModel.Styles.FullDesc = lipgloss.NewStyle().Foreground(colorGray)
 	helpModel.Styles.FullSeparator = lipgloss.NewStyle().Foreground(colorGray)
+	spinnerModel := spinner.New()
+	spinnerModel.Spinner = spinner.Dot
+	spinnerModel.Style = lipgloss.NewStyle().Foreground(colorOrange)
 	m := model{
 		input:   input,
 		message: "",
 		help:    helpModel,
 		keys:    keys,
+		spinner: spinnerModel,
 	}
 	m.history = loadHistory()
 	p := tea.NewProgram(m)
