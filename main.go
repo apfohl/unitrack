@@ -7,13 +7,30 @@ import (
 	"strings"
 	"time"
 
-	textinput "github.com/charmbracelet/bubbles/textinput"
+		textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	resty "github.com/go-resty/resty/v2"
 )
 
 var version = "unknown"
+
+var (
+	colorOrange = lipgloss.Color("166")    // muted orange
+	colorRed    = lipgloss.Color("131")    // muted red
+	colorYellow = lipgloss.Color("143")    // muted yellow
+	colorWhite  = lipgloss.Color("250")    // dim white
+	colorBlack  = lipgloss.Color("235")    // dark gray, subtle background
+
+	logoStyle  = lipgloss.NewStyle().Background(colorRed).Foreground(colorWhite).Bold(true).Padding(1, 2)
+	headerBar  = lipgloss.NewStyle().Background(colorOrange).Foreground(colorBlack).Bold(true).Padding(0, 3)
+	inputBox   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder(), false, false, false, true).BorderForeground(colorYellow).Padding(0, 1)
+	inputLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
+	timerBox   = lipgloss.NewStyle().Background(colorYellow).Foreground(colorBlack).Bold(true).Padding(0, 2).MarginRight(2)
+	pausedBox  = lipgloss.NewStyle().Foreground(colorBlack).Background(colorYellow).Bold(true).Underline(true).Padding(0, 2)
+	msgStyle   = lipgloss.NewStyle().Foreground(colorRed).Italic(true).Background(colorBlack)
+	footerBar  = lipgloss.NewStyle().Background(colorOrange).Foreground(colorBlack).Padding(0, 3)
+)
 
 type timerMsg time.Duration
 
@@ -40,21 +57,12 @@ type model struct {
 	historyNav   bool
 	screen       screen
 
+
 	// For timer recovery
 	savedTimerIssue string
 	savedTimerValue time.Duration
 	lastSaveTime    time.Time
 }
-
-var (
-	headerStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("12")).Bold(true).Padding(0, 1)
-	inputStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("0")).Padding(0, 1)
-	timerStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("10")).Bold(true)
-	pausedStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11")).Bold(true)
-	msgStyle    = lipgloss.NewStyle().Foreground(lipgloss.Color("13")).Italic(true)
-	helpStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(0, 1)
-	promptStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("6")).Bold(true)
-)
 
 func (m model) Init() tea.Cmd {
 	m.history = loadHistory()
@@ -108,14 +116,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					fullId = prefix + "-" + val
 				}
 				if !m.timerActive && val != "" {
-					// Check for saved timer
 					if saved := loadSavedTimer(fullId); saved != nil {
 						m.savedTimerIssue = fullId
 						m.savedTimerValue = saved.Duration
 						m.screen = screenRecoverTimer
 						return m, nil
 					}
-
 					found := false
 					for _, h := range m.history {
 						if h == fullId {
@@ -193,7 +199,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case timerMsg:
 			if m.timerActive && !m.timerPaused {
 				m.timerValue = time.Since(m.timerStart) - m.totalPaused
-				// Auto-save every minute
 				if time.Since(m.lastSaveTime) >= time.Minute {
 					issueId := m.input.Value()
 					saveTimer(issueId, m.timerValue, m.timerStart, m.totalPaused)
@@ -229,7 +234,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg := msg.(type) {
 		case tea.KeyMsg:
 			if msg.String() == "y" {
-				// Continue with saved timer
 				m.input.SetValue(m.savedTimerIssue)
 				m.timerActive = true
 				m.timerPaused = false
@@ -241,7 +245,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.lastSaveTime = time.Now()
 				return m, tickTimer()
 			} else if msg.String() == "n" {
-				// Discard and start fresh
 				deleteSavedTimer(m.savedTimerIssue)
 				m.input.SetValue(m.savedTimerIssue)
 				m.timerActive = true
@@ -263,25 +266,38 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m model) View() string {
 	switch m.screen {
 	case screenMainApp:
-		view := headerStyle.Render("unitrack - Linear time tracker") + "\n\n"
-		view += inputStyle.Render("Issue ID: ") + m.input.View() + "\n"
+		logo := logoStyle.Render("⏱ unitrack")
+		header := headerBar.Render("Linear time tracker")
+		input := inputBox.Render(inputLabel.Render("Issue ID: ") + m.input.View())
+		var timer string
 		if m.timerActive {
-			view += timerStyle.Render("Timer: "+fmtDuration(m.timerValue)) + "\n"
+			timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
 			if m.timerPaused {
-				view += pausedStyle.Render("[PAUSED]") + "\n"
+				timer += " " + pausedBox.Render("[PAUSED]")
 			}
 		}
+		msg := ""
 		if m.message != "" {
-			view += msgStyle.Render(m.message) + "\n"
+			msg = "\n" + msgStyle.Render(m.message)
 		}
-		view += helpStyle.Render("'q' quit  'enter' start  's' submit  'p' pause  'r' resume  'c' cancel  ↑/↓ history")
-		return view
+		controls := "'q' quit   'enter' start   's' submit   'p' pause   'r' resume   'c' cancel   ↑/↓ history"
+		footer := footerBar.Render(controls)
+		return lipgloss.JoinVertical(lipgloss.Top,
+			logo,
+			header,
+			"",
+			input,
+			"",
+			timer+msg,
+			"",
+			footer,
+		)
 	case screenConfirmCancel:
-		prompt := promptStyle.Render("Cancel timer? Press y to confirm, n to abort.") + "\n"
+		prompt := headerBar.Render("Cancel timer? Press y to confirm, n to abort.")
 		return prompt
 	case screenRecoverTimer:
-		prompt := promptStyle.Render(fmt.Sprintf("Found saved timer for %s at %s.", m.savedTimerIssue, fmtDuration(m.savedTimerValue))) + "\n"
-		prompt += promptStyle.Render("Continue from saved time? Press y to continue, n to start fresh.") + "\n"
+		prompt := headerBar.Render(fmt.Sprintf("Found saved timer for %s at %s.", m.savedTimerIssue, fmtDuration(m.savedTimerValue))) +
+			headerBar.Render("Continue from saved time? Press y to continue, n to start fresh.")
 		return prompt
 	}
 	return ""
@@ -303,7 +319,7 @@ func fmtDuration(d time.Duration) string {
 
 func ceilToQuarter(d time.Duration) string {
 	tm := d.Minutes()
-	quar := int((tm+14.999)/15) * 15 // ceil to next 15
+	quar := int((tm+14.999)/15) * 15
 	h := quar / 60
 	m := quar % 60
 	return fmt.Sprintf("%d:%02d", h, m)
@@ -403,14 +419,12 @@ func saveTimer(issueID string, duration time.Duration, startTime time.Time, tota
 		TotalPaused: totalPaused,
 		SavedAt:     time.Now(),
 	}
-
 	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
 	b, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
 		logError(fmt.Sprintf("Failed to marshal saved timer: %v", err))
 		return
 	}
-
 	err = os.WriteFile(path, b, 0600)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to save timer: %v", err))
@@ -423,7 +437,6 @@ func loadSavedTimer(issueID string) *savedTimer {
 	if err != nil {
 		return nil
 	}
-
 	var saved savedTimer
 	err = json.Unmarshal(b, &saved)
 	if err != nil {
@@ -431,7 +444,6 @@ func loadSavedTimer(issueID string) *savedTimer {
 		return nil
 	}
 
-	// Check if saved timer is too old (default: 5 days)
 	expireDays := 5
 	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
 	b, err = os.ReadFile(cfgPath)
@@ -441,12 +453,10 @@ func loadSavedTimer(issueID string) *savedTimer {
 			expireDays = cfg.TimerExpireDays
 		}
 	}
-
 	if time.Since(saved.SavedAt) > time.Duration(expireDays)*24*time.Hour {
 		deleteSavedTimer(issueID)
 		return nil
 	}
-
 	return &saved
 }
 
