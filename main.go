@@ -4,11 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/help"
 	"github.com/charmbracelet/bubbles/key"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	textinput "github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -42,27 +44,29 @@ const (
 	screenMainApp screen = iota
 	screenConfirmCancel
 	screenRecoverTimer
+	screenLimitedTimer
 )
 
 type keyMap struct {
-	Quit   key.Binding
-	Start  key.Binding
-	Submit key.Binding
-	Pause  key.Binding
-	Resume key.Binding
-	Cancel key.Binding
-	Up     key.Binding
-	Down   key.Binding
-	Help   key.Binding
+	Quit         key.Binding
+	Start        key.Binding
+	Submit       key.Binding
+	Pause        key.Binding
+	Resume       key.Binding
+	Cancel       key.Binding
+	Up           key.Binding
+	Down         key.Binding
+	Help         key.Binding
+	LimitedTimer key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Start, k.Submit, k.Help, k.Quit}
+	return []key.Binding{k.Start, k.LimitedTimer, k.Submit, k.Help, k.Quit}
 }
 
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.Start, k.Submit, k.Pause, k.Resume},
+		{k.Start, k.LimitedTimer, k.Submit, k.Pause, k.Resume},
 		{k.Cancel, k.Up, k.Down, k.Help, k.Quit},
 	}
 }
@@ -104,6 +108,10 @@ var keys = keyMap{
 		key.WithKeys("?"),
 		key.WithHelp("?", "more"),
 	),
+	LimitedTimer: key.NewBinding(
+		key.WithKeys("l"),
+		key.WithHelp("l", "limited timer"),
+	),
 }
 
 type model struct {
@@ -128,6 +136,13 @@ type model struct {
 	savedTimerIssue string
 	savedTimerValue time.Duration
 	lastSaveTime    time.Time
+
+	// For limited timer
+	limitedTimer   bool
+	timerLimit     time.Duration
+	limitInput     textinput.Model
+	progressBar    progress.Model
+	pendingIssueID string
 }
 
 func (m model) Init() tea.Cmd {
@@ -144,6 +159,12 @@ func (m model) Init() tea.Cmd {
 	m.spinner = spinner.New()
 	m.spinner.Spinner = spinner.Dot
 	m.spinner.Style = lipgloss.NewStyle().Foreground(colorOrange)
+	m.limitInput = textinput.New()
+	m.limitInput.Placeholder = "15"
+	m.limitInput.CharLimit = 4
+	m.limitInput.Width = 10
+	m.progressBar = progress.New(progress.WithDefaultGradient())
+	m.progressBar.Width = 40
 	return textinput.Blink
 }
 
@@ -180,6 +201,82 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "?":
 				m.help.ShowAll = !m.help.ShowAll
 				return m, nil
+			case "l":
+				val := m.input.Value()
+				fullId := val
+				cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
+				b, err := os.ReadFile(cfgPath)
+				prefix := "UE"
+				if err == nil {
+					var cfg apiConfig
+					if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+						prefix = cfg.Prefix
+					}
+				}
+				if !strings.HasPrefix(val, prefix+"-") && val != "" {
+					fullId = prefix + "-" + val
+				}
+				if !m.timerActive && val != "" {
+					m.pendingIssueID = fullId
+					m.screen = screenLimitedTimer
+					m.limitInput.Focus()
+					return m, textinput.Blink
+				}
+				if val == "" && !m.timerActive {
+					m.message = "Issue ID cannot be empty."
+					return m, nil
+				}
+			case "p":
+				if m.timerActive && !m.timerPaused {
+					m.timerPaused = true
+					m.pauseTime = time.Now()
+					m.message = "Paused. Press 'r' to resume."
+					return m, nil
+				}
+			case "r":
+				if m.timerActive && m.timerPaused {
+					m.timerPaused = false
+					m.totalPaused += time.Since(m.pauseTime)
+					m.message = "Resumed."
+					if m.limitedTimer {
+						return m, tickTimer()
+					} else {
+						return m, tea.Batch(tickTimer(), m.spinner.Tick)
+					}
+				}
+			case "s":
+				if m.timerActive {
+					ceiled := ceilToQuarter(m.timerValue)
+					issueId := m.input.Value()
+					cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
+					b, err := os.ReadFile(cfgPath)
+					prefix := "UE"
+					if err == nil {
+						var cfg apiConfig
+						if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+							prefix = cfg.Prefix
+						}
+					}
+					if !strings.HasPrefix(issueId, prefix+"-") && issueId != "" {
+						issueId = prefix + "-" + issueId
+					}
+					msg := fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
+					m.message = msg
+					m.timerActive = false
+					m.timerPaused = false
+					logEntry := fmt.Sprintf("SUBMIT ISSUE: %s TIME: %s CEIL: %s", issueId, fmtDuration(m.timerValue), ceiled)
+					logError(logEntry)
+					deleteSavedTimer(issueId)
+					go postLinearComment(issueId, ceiled)
+					m.input.SetValue("")
+					m.input.Focus()
+					return m, textinput.Blink
+				}
+			case "c":
+				if m.timerActive {
+					m.screen = screenConfirmCancel
+					return m, nil
+				}
 			case "enter":
 				val := m.input.Value()
 				fullId := val
@@ -218,7 +315,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timerActive = true
 					m.timerPaused = false
 					m.timerStart = time.Now()
-				m.input.Blur()
+					m.input.Blur()
 					m.timerValue = 0
 					m.totalPaused = 0
 					m.message = ""
@@ -229,49 +326,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.message = "Issue ID cannot be empty."
 					return m, nil
 				}
-			case "p":
-				if m.timerActive && !m.timerPaused {
-					m.timerPaused = true
-					m.pauseTime = time.Now()
-					m.message = "Paused. Press 'r' to resume."
-					return m, nil
-				}
-			case "r":
-				if m.timerActive && m.timerPaused {
-					m.timerPaused = false
-					m.totalPaused += time.Since(m.pauseTime)
-					m.message = "Resumed."
-					return m, tea.Batch(tickTimer(), m.spinner.Tick)
-				}
-			case "s":
-				if m.timerActive {
-					ceiled := ceilToQuarter(m.timerValue)
-					issueId := m.input.Value()
-					cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-					b, err := os.ReadFile(cfgPath)
-					prefix := "UE"
-					if err == nil {
-						var cfg apiConfig
-						if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
-							prefix = cfg.Prefix
-						}
-					}
-					if !strings.HasPrefix(issueId, prefix+"-") && issueId != "" {
-						issueId = prefix + "-" + issueId
-					}
-					msg := fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
-					m.message = msg
-					m.timerActive = false
-					m.timerPaused = false
-					logEntry := fmt.Sprintf("SUBMIT ISSUE: %s TIME: %s CEIL: %s", issueId, fmtDuration(m.timerValue), ceiled)
-					logError(logEntry)
-					deleteSavedTimer(issueId)
-					go postLinearComment(issueId, ceiled)
-					m.input.SetValue("")
-					m.input.Focus()
-					return m, textinput.Blink
-				}
-			case "c":
 				if m.timerActive {
 					m.screen = screenConfirmCancel
 					return m, nil
@@ -280,12 +334,33 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case timerMsg:
 			if m.timerActive && !m.timerPaused {
 				m.timerValue = time.Since(m.timerStart) - m.totalPaused
+				if m.limitedTimer && m.timerValue >= m.timerLimit {
+					m.timerValue = m.timerLimit
+					ceiled := ceilToQuarter(m.timerValue)
+					issueId := m.input.Value()
+					msg := fmt.Sprintf("Time limit reached! Posting %s to Linear for issue %s...", ceiled, issueId)
+					m.message = msg
+					m.timerActive = false
+					m.timerPaused = false
+					m.limitedTimer = false
+					logEntry := fmt.Sprintf("AUTO-SUBMIT ISSUE: %s TIME: %s CEIL: %s", issueId, fmtDuration(m.timerValue), ceiled)
+					logError(logEntry)
+					deleteSavedTimer(issueId)
+					go postLinearComment(issueId, ceiled)
+					m.input.SetValue("")
+					m.input.Focus()
+					return m, textinput.Blink
+				}
 				if time.Since(m.lastSaveTime) >= time.Minute {
 					issueId := m.input.Value()
 					saveTimer(issueId, m.timerValue, m.timerStart, m.totalPaused)
 					m.lastSaveTime = time.Now()
 				}
-				return m, tea.Batch(tickTimer(), m.spinner.Tick)
+				if m.limitedTimer {
+					return m, tickTimer()
+				} else {
+					return m, tea.Batch(tickTimer(), m.spinner.Tick)
+				}
 			}
 		}
 		var cmd tea.Cmd
@@ -302,6 +377,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				deleteSavedTimer(issueId)
 				m.timerActive = false
 				m.timerPaused = false
+				m.limitedTimer = false
+				m.limitedTimer = false
 				m.screen = screenMainApp
 				m.message = "Timer cancelled."
 				m.input.SetValue("")
@@ -310,7 +387,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else if msg.String() == "n" {
 				m.screen = screenMainApp
 				m.message = "Cancel aborted."
-				return m, tea.Batch(tickTimer(), m.spinner.Tick)
+				if m.limitedTimer {
+					return m, tickTimer()
+				} else {
+					return m, tea.Batch(tickTimer(), m.spinner.Tick)
+				}
 			}
 		}
 		return m, nil
@@ -345,6 +426,56 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, nil
+	case screenLimitedTimer:
+		switch msg := msg.(type) {
+		case tea.KeyMsg:
+			switch msg.String() {
+			case "enter":
+				minutesStr := m.limitInput.Value()
+				if minutesStr == "" {
+					m.message = "Please enter a number of minutes."
+					return m, nil
+				}
+				minutes, err := strconv.Atoi(minutesStr)
+				if err != nil || minutes <= 0 {
+					m.message = "Please enter a valid positive number."
+					return m, nil
+				}
+				m.timerLimit = time.Duration(minutes) * time.Minute
+				m.limitedTimer = true
+				found := false
+				for _, h := range m.history {
+					if h == m.pendingIssueID {
+						found = true
+						break
+					}
+				}
+				if !found {
+					m.history = append(m.history, m.pendingIssueID)
+					saveHistory(m.history)
+				}
+				m.input.SetValue(m.pendingIssueID)
+				m.historyNav = false
+				m.timerActive = true
+				m.timerPaused = false
+				m.timerStart = time.Now()
+				m.input.Blur()
+				m.timerValue = 0
+				m.totalPaused = 0
+				m.message = fmt.Sprintf("Limited timer started for %d minutes", minutes)
+				m.screen = screenMainApp
+				m.lastSaveTime = time.Now()
+				return m, tickTimer()
+			case "ctrl+c", "q", "esc":
+				m.screen = screenMainApp
+				m.limitInput.SetValue("")
+				m.message = "Limited timer cancelled."
+				return m, nil
+			}
+		}
+		var cmd tea.Cmd
+		m.limitInput, cmd = m.limitInput.Update(msg)
+		return m, cmd
 	}
 	return m, nil
 }
@@ -359,14 +490,25 @@ func (m model) View() string {
 		input = lipgloss.NewStyle().PaddingLeft(1).Render(input)
 		var timer string
 		if m.timerActive {
-			if !m.timerPaused {
-				spinnerWithPadding := lipgloss.NewStyle().PaddingLeft(1).Render(m.spinner.View())
-				timer = spinnerWithPadding + " " + timerBox.Render("Timer: "+fmtDuration(m.timerValue))
-			} else {
+			if m.limitedTimer {
 				timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
-			}
-			if m.timerPaused {
-				timer += " " + pausedBox.Render("[PAUSED]")
+				progress := float64(m.timerValue) / float64(m.timerLimit)
+				if progress > 1.0 {
+					progress = 1.0
+				}
+				progressView := m.progressBar.ViewAs(progress)
+				timer += "\n" + progressView
+				timer += "\n" + msgStyle.Render(fmt.Sprintf("Limit: %s", fmtDuration(m.timerLimit)))
+			} else {
+				if !m.timerPaused {
+					spinnerWithPadding := lipgloss.NewStyle().PaddingLeft(1).Render(m.spinner.View())
+					timer = spinnerWithPadding + " " + timerBox.Render("Timer: "+fmtDuration(m.timerValue))
+				} else {
+					timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
+				}
+				if m.timerPaused {
+					timer += " " + pausedBox.Render("[PAUSED]")
+				}
 			}
 		}
 		msg := ""
@@ -389,6 +531,25 @@ func (m model) View() string {
 		prompt := headerBar.Render(fmt.Sprintf("Found saved timer for %s at %s.", m.savedTimerIssue, fmtDuration(m.savedTimerValue))) +
 			headerBar.Render("Continue from saved time? Press y to continue, n to start fresh.")
 		return prompt
+	case screenLimitedTimer:
+		logo := logoStyle.Render("⏱ unitrack")
+		header := headerBar.Render("Limited Timer Setup")
+		titleLine := lipgloss.JoinHorizontal(lipgloss.Left, logo, header)
+		issueInfo := inputLabel.Render(fmt.Sprintf("Issue: %s", m.pendingIssueID))
+		limitInput := inputBox.Render(inputLabel.Render("Minutes: ") + m.limitInput.View())
+		limitInput = lipgloss.NewStyle().PaddingLeft(1).Render(limitInput)
+		instructions := msgStyle.Render("Enter the number of minutes for the timer limit, then press Enter.")
+		msg := ""
+		if m.message != "" {
+			msg = "\n" + msgStyle.Render(m.message)
+		}
+		return lipgloss.JoinVertical(lipgloss.Top,
+			titleLine,
+			issueInfo,
+			limitInput,
+			"",
+			instructions+msg,
+		)
 	}
 	return ""
 }
@@ -585,12 +746,20 @@ func main() {
 	spinnerModel := spinner.New()
 	spinnerModel.Spinner = spinner.Dot
 	spinnerModel.Style = lipgloss.NewStyle().Foreground(colorOrange)
+	limitInput := textinput.New()
+	limitInput.Placeholder = "15"
+	limitInput.CharLimit = 4
+	limitInput.Width = 10
+	progressBar := progress.New(progress.WithDefaultGradient())
+	progressBar.Width = 40
 	m := model{
-		input:   input,
-		message: "",
-		help:    helpModel,
-		keys:    keys,
-		spinner: spinnerModel,
+		input:       input,
+		message:     "",
+		help:        helpModel,
+		keys:        keys,
+		spinner:     spinnerModel,
+		limitInput:  limitInput,
+		progressBar: progressBar,
 	}
 	m.history = loadHistory()
 	p := tea.NewProgram(m)
