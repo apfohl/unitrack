@@ -12,10 +12,10 @@ import (
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
-	textinput "github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	resty "github.com/go-resty/resty/v2"
+	"github.com/go-resty/resty/v2"
 )
 
 var version = "unknown"
@@ -27,13 +27,16 @@ var (
 	colorLightGray = lipgloss.Color("250") // lighter gray for keys
 	colorGray      = lipgloss.Color("245") // gray for descriptions
 
-	logoStyle  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 1)
-	headerBar  = lipgloss.NewStyle().Bold(true).Padding(1, 1)
-	inputBox   = lipgloss.NewStyle().Border(lipgloss.DoubleBorder(), false, false, false, true).BorderForeground(colorYellow)
-	inputLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
-	timerBox   = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).Padding(0, 2).MarginRight(2)
-	pausedBox  = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).Padding(0, 2)
-	msgStyle   = lipgloss.NewStyle().Foreground(colorRed).Italic(true)
+	logoStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 0, 1, 1)
+	headerBar = lipgloss.NewStyle().Bold(true).Padding(1, 1).Padding(1, 0, 1, 2)
+
+	inputLabel   = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).PaddingLeft(1)
+	timerBox     = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).PaddingLeft(1).PaddingTop(1)
+	progressBox  = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
+	spinnerStyle = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
+	pausedBox    = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).PaddingLeft(2).PaddingTop(1)
+	msgStyle     = lipgloss.NewStyle().Foreground(colorRed).Italic(true).PaddingLeft(1).PaddingTop(1)
+	helpStyle    = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
 )
 
 type timerMsg time.Duration
@@ -41,10 +44,10 @@ type timerMsg time.Duration
 type screen int
 
 const (
-	screenMainApp screen = iota
+	screenMain screen = iota
 	screenConfirmCancel
 	screenRecoverTimer
-	screenLimitedTimer
+	screenLimitedTimerSetup
 )
 
 type keyMap struct {
@@ -133,9 +136,11 @@ type model struct {
 	spinner      spinner.Model
 
 	// For timer recovery
-	savedTimerIssue string
-	savedTimerValue time.Duration
-	lastSaveTime    time.Time
+	savedTimerIssue   string
+	savedTimerValue   time.Duration
+	savedTimerLimited bool
+	savedTimerLimit   time.Duration
+	lastSaveTime      time.Time
 
 	// For limited timer
 	limitedTimer   bool
@@ -147,7 +152,9 @@ type model struct {
 
 func (m model) Init() tea.Cmd {
 	m.history = loadHistory()
-	m.screen = screenMainApp
+	m.screen = screenMain
+	m.keys = keys
+
 	m.help = help.New()
 	m.help.Styles.ShortKey = lipgloss.NewStyle().Foreground(colorLightGray)
 	m.help.Styles.ShortDesc = lipgloss.NewStyle().Foreground(colorGray)
@@ -155,25 +162,28 @@ func (m model) Init() tea.Cmd {
 	m.help.Styles.FullKey = lipgloss.NewStyle().Foreground(colorLightGray)
 	m.help.Styles.FullDesc = lipgloss.NewStyle().Foreground(colorGray)
 	m.help.Styles.FullSeparator = lipgloss.NewStyle().Foreground(colorGray)
-	m.keys = keys
+
 	m.spinner = spinner.New()
 	m.spinner.Spinner = spinner.Dot
 	m.spinner.Style = lipgloss.NewStyle().Foreground(colorOrange)
+
 	m.limitInput = textinput.New()
 	m.limitInput.Placeholder = "15"
 	m.limitInput.CharLimit = 4
 	m.limitInput.Width = 10
+
 	m.progressBar = progress.New(progress.WithDefaultGradient())
 	m.progressBar.Width = 40
+
 	return textinput.Blink
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.screen {
-	case screenMainApp:
-		switch msg := msg.(type) {
+	case screenMain:
+		switch message := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
+			switch message.String() {
 			case "up":
 				if !m.timerActive && len(m.history) > 0 {
 					if !m.historyNav {
@@ -184,7 +194,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.input.SetValue(m.history[m.historyIndex])
 				}
+
 				return m, nil
+
 			case "down":
 				if !m.timerActive && m.historyNav && len(m.history) > 0 {
 					if m.historyIndex < len(m.history)-1 {
@@ -195,17 +207,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.historyNav = false
 					}
 				}
+
 				return m, nil
+
 			case "ctrl+c", "q":
 				return m, tea.Quit
+
 			case "?":
 				m.help.ShowAll = !m.help.ShowAll
+
 				return m, nil
+
 			case "l":
 				val := m.input.Value()
 				fullId := val
-				cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-				b, err := os.ReadFile(cfgPath)
+
+				b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 				prefix := "UE"
 				if err == nil {
 					var cfg apiConfig
@@ -213,43 +230,53 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						prefix = cfg.Prefix
 					}
 				}
+
 				if !strings.HasPrefix(val, prefix+"-") && val != "" {
 					fullId = prefix + "-" + val
 				}
+
 				if !m.timerActive && val != "" {
 					m.pendingIssueID = fullId
-					m.screen = screenLimitedTimer
+					m.screen = screenLimitedTimerSetup
 					m.limitInput.Focus()
+
 					return m, textinput.Blink
 				}
+
 				if val == "" && !m.timerActive {
 					m.message = "Issue ID cannot be empty."
+
 					return m, nil
 				}
+
 			case "p":
 				if m.timerActive && !m.timerPaused {
 					m.timerPaused = true
 					m.pauseTime = time.Now()
-					m.message = "Paused. Press 'r' to resume."
+					m.message = "Press 'r' to resume."
+
 					return m, nil
 				}
+
 			case "r":
 				if m.timerActive && m.timerPaused {
 					m.timerPaused = false
 					m.totalPaused += time.Since(m.pauseTime)
-					m.message = "Resumed."
+					m.message = "Timer resumed."
+
 					if m.limitedTimer {
 						return m, tickTimer()
 					} else {
 						return m, tea.Batch(tickTimer(), m.spinner.Tick)
 					}
 				}
+
 			case "s":
 				if m.timerActive {
 					ceiled := ceilToQuarter(m.timerValue)
 					issueId := m.input.Value()
-					cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-					b, err := os.ReadFile(cfgPath)
+
+					b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 					prefix := "UE"
 					if err == nil {
 						var cfg apiConfig
@@ -257,31 +284,43 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							prefix = cfg.Prefix
 						}
 					}
+
 					if !strings.HasPrefix(issueId, prefix+"-") && issueId != "" {
 						issueId = prefix + "-" + issueId
 					}
-					msg := fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
-					m.message = msg
+
+					m.message = fmt.Sprintf("Posting %s to Linear for issue %s...", ceiled, issueId)
 					m.timerActive = false
 					m.timerPaused = false
-					logEntry := fmt.Sprintf("SUBMIT ISSUE: %s TIME: %s CEIL: %s", issueId, fmtDuration(m.timerValue), ceiled)
-					logError(logEntry)
+
+					logError(fmt.Sprintf(
+						"SUBMIT ISSUE: %s TIME: %s CEIL: %s",
+						issueId,
+						fmtDuration(m.timerValue),
+						ceiled,
+					))
+
 					deleteSavedTimer(issueId)
+
 					go postLinearComment(issueId, ceiled)
+
 					m.input.SetValue("")
 					m.input.Focus()
+
 					return m, textinput.Blink
 				}
+
 			case "c":
 				if m.timerActive {
 					m.screen = screenConfirmCancel
 					return m, nil
 				}
+
 			case "enter":
 				val := m.input.Value()
 				fullId := val
-				cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-				b, err := os.ReadFile(cfgPath)
+
+				b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 				prefix := "UE"
 				if err == nil {
 					var cfg apiConfig
@@ -289,16 +328,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						prefix = cfg.Prefix
 					}
 				}
+
 				if !strings.HasPrefix(val, prefix+"-") && val != "" {
 					fullId = prefix + "-" + val
 				}
+
 				if !m.timerActive && val != "" {
 					if saved := loadSavedTimer(fullId); saved != nil {
 						m.savedTimerIssue = fullId
 						m.savedTimerValue = saved.Duration
+						m.savedTimerLimited = saved.LimitedTimer
+						m.savedTimerLimit = saved.TimerLimit
 						m.screen = screenRecoverTimer
+
 						return m, nil
 					}
+
 					found := false
 					for _, h := range m.history {
 						if h == fullId {
@@ -310,6 +355,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.history = append(m.history, fullId)
 						saveHistory(m.history)
 					}
+
 					m.input.SetValue(fullId)
 					m.historyNav = false
 					m.timerActive = true
@@ -318,19 +364,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.input.Blur()
 					m.timerValue = 0
 					m.totalPaused = 0
-					m.message = ""
+					m.message = "Timer started."
 					m.lastSaveTime = time.Now()
+
 					return m, tea.Batch(tickTimer(), m.spinner.Tick)
 				}
+
 				if val == "" && !m.timerActive {
 					m.message = "Issue ID cannot be empty."
-					return m, nil
-				}
-				if m.timerActive {
-					m.screen = screenConfirmCancel
+
 					return m, nil
 				}
 			}
+
 		case timerMsg:
 			if m.timerActive && !m.timerPaused {
 				m.timerValue = time.Since(m.timerStart) - m.totalPaused
@@ -338,8 +384,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.timerValue = m.timerLimit
 					ceiled := ceilToQuarter(m.timerValue)
 					issueId := m.input.Value()
-					msg := fmt.Sprintf("Time limit reached! Posting %s to Linear for issue %s...", ceiled, issueId)
-					m.message = msg
+					m.message = fmt.Sprintf("Time limit reached! Posting %s to Linear for issue %s...", ceiled, issueId)
 					m.timerActive = false
 					m.timerPaused = false
 					m.limitedTimer = false
@@ -349,13 +394,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					go postLinearComment(issueId, ceiled)
 					m.input.SetValue("")
 					m.input.Focus()
+
 					return m, textinput.Blink
 				}
+
 				if time.Since(m.lastSaveTime) >= time.Minute {
 					issueId := m.input.Value()
-					saveTimer(issueId, m.timerValue, m.timerStart, m.totalPaused)
+					saveTimer(issueId, m.timerValue, m.timerStart, m.totalPaused, m.limitedTimer, m.timerLimit)
 					m.lastSaveTime = time.Now()
 				}
+
 				if m.limitedTimer {
 					return m, tickTimer()
 				} else {
@@ -363,30 +411,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
 		var cmd tea.Cmd
 		if !m.timerActive {
 			m.input, cmd = m.input.Update(msg)
 		}
 		m.spinner, _ = m.spinner.Update(msg)
+
 		return m, cmd
+
 	case screenConfirmCancel:
-		switch msg := msg.(type) {
+		switch message := msg.(type) {
 		case tea.KeyMsg:
-			if msg.String() == "y" {
+			if message.String() == "y" {
 				issueId := m.input.Value()
 				deleteSavedTimer(issueId)
 				m.timerActive = false
 				m.timerPaused = false
 				m.limitedTimer = false
 				m.limitedTimer = false
-				m.screen = screenMainApp
+				m.screen = screenMain
 				m.message = "Timer cancelled."
 				m.input.SetValue("")
 				m.input.Focus()
+
 				return m, textinput.Blink
-			} else if msg.String() == "n" {
-				m.screen = screenMainApp
+			} else if message.String() == "n" {
+				m.screen = screenMain
 				m.message = "Cancel aborted."
+
 				if m.limitedTimer {
 					return m, tickTimer()
 				} else {
@@ -394,25 +447,32 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+
 		return m, nil
+
 	case screenRecoverTimer:
-		switch msg := msg.(type) {
+		switch message := msg.(type) {
 		case tea.KeyMsg:
-			if msg.String() == "y" {
-				// m.input.SetValue(m.savedTimerIssue) // avoid redundant assignment
+			if message.String() == "y" {
 				m.timerActive = true
 				m.timerPaused = false
+				m.limitedTimer = m.savedTimerLimited
+				m.timerLimit = m.savedTimerLimit
 				m.timerStart = time.Now().Add(-m.savedTimerValue)
 				m.input.Blur()
 				m.timerValue = m.savedTimerValue
 				m.totalPaused = 0
 				m.message = fmt.Sprintf("Resumed timer at %s", fmtDuration(m.savedTimerValue))
-				m.screen = screenMainApp
+				m.screen = screenMain
 				m.lastSaveTime = time.Now()
-				return m, tea.Batch(tickTimer(), m.spinner.Tick)
-			} else if msg.String() == "n" {
+
+				if m.limitedTimer {
+					return m, tickTimer()
+				} else {
+					return m, tea.Batch(tickTimer(), m.spinner.Tick)
+				}
+			} else if message.String() == "n" {
 				deleteSavedTimer(m.savedTimerIssue)
-				// m.input.SetValue(m.savedTimerIssue) // avoid double-set on fresh start
 				m.timerActive = true
 				m.timerPaused = false
 				m.timerStart = time.Now()
@@ -420,16 +480,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timerValue = 0
 				m.totalPaused = 0
 				m.message = "Starting fresh timer."
-				m.screen = screenMainApp
+				m.screen = screenMain
 				m.lastSaveTime = time.Now()
+
 				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
 		}
+
 		return m, nil
-	case screenLimitedTimer:
-		switch msg := msg.(type) {
+
+	case screenLimitedTimerSetup:
+		switch message := msg.(type) {
 		case tea.KeyMsg:
-			switch msg.String() {
+			switch message.String() {
 			case "enter":
 				minutesStr := m.limitInput.Value()
 				if minutesStr == "" {
@@ -463,94 +526,156 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.timerValue = 0
 				m.totalPaused = 0
 				m.message = fmt.Sprintf("Limited timer started for %d minutes", minutes)
-				m.screen = screenMainApp
+				m.screen = screenMain
 				m.lastSaveTime = time.Now()
 				return m, tickTimer()
+
 			case "ctrl+c", "q", "esc":
-				m.screen = screenMainApp
+				m.screen = screenMain
 				m.limitInput.SetValue("")
 				m.message = "Limited timer cancelled."
 				return m, nil
 			}
 		}
+
 		var cmd tea.Cmd
 		m.limitInput, cmd = m.limitInput.Update(msg)
+
 		return m, cmd
 	}
+
 	return m, nil
 }
 
 func (m model) View() string {
 	switch m.screen {
-	case screenMainApp:
-		logo := logoStyle.Render("⏱ unitrack")
-		header := headerBar.Render("Linear time tracker")
-		titleLine := lipgloss.JoinHorizontal(lipgloss.Left, logo, header)
-		input := inputBox.Render(inputLabel.Render("Issue ID: ") + m.input.View())
-		input = lipgloss.NewStyle().PaddingLeft(1).Render(input)
+	case screenMain:
+		titleLine := lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			logoStyle.Render("⏱ unitrack"),
+			headerBar.Render("Linear time tracker"),
+		)
+		input := lipgloss.JoinHorizontal(
+			lipgloss.Left,
+			inputLabel.Render("Issue ID: "),
+			m.input.View(),
+		)
+		shortcutsHelp := helpStyle.Render(m.help.View(keys))
+
 		var timer string
 		if m.timerActive {
 			if m.limitedTimer {
-				timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
-				progress := float64(m.timerValue) / float64(m.timerLimit)
-				if progress > 1.0 {
-					progress = 1.0
+				timerProgress := float64(m.timerValue) / float64(m.timerLimit)
+				if timerProgress > 1.0 {
+					timerProgress = 1.0
 				}
-				progressView := m.progressBar.ViewAs(progress)
-				timer += "\n" + progressView
-				timer += "\n" + msgStyle.Render(fmt.Sprintf("Limit: %s", fmtDuration(m.timerLimit)))
-			} else {
-				if !m.timerPaused {
-					spinnerWithPadding := lipgloss.NewStyle().PaddingLeft(1).Render(m.spinner.View())
-					timer = spinnerWithPadding + " " + timerBox.Render("Timer: "+fmtDuration(m.timerValue))
-				} else {
-					timer = timerBox.Render("Timer: " + fmtDuration(m.timerValue))
-				}
+
 				if m.timerPaused {
-					timer += " " + pausedBox.Render("[PAUSED]")
+					timer = lipgloss.JoinVertical(
+						lipgloss.Top,
+						lipgloss.JoinHorizontal(
+							lipgloss.Left,
+							timerBox.Render("Timer: "+fmtDuration(m.timerValue)),
+							pausedBox.Render("[PAUSED]"),
+						),
+						progressBox.Render(m.progressBar.ViewAs(timerProgress)),
+						msgStyle.Render(fmt.Sprintf("Limit: %s", fmtDuration(m.timerLimit))),
+					)
+				} else {
+					timer = lipgloss.JoinVertical(
+						lipgloss.Top,
+						lipgloss.JoinHorizontal(
+							lipgloss.Left,
+							spinnerStyle.Render(m.spinner.View()),
+							timerBox.Render("Timer: "+fmtDuration(m.timerValue)),
+						),
+						progressBox.Render(m.progressBar.ViewAs(timerProgress)),
+						msgStyle.Render(fmt.Sprintf("Limit: %s", fmtDuration(m.timerLimit))),
+					)
+				}
+			} else {
+				if m.timerPaused {
+					timer = lipgloss.JoinHorizontal(
+						lipgloss.Left,
+						timerBox.Render("Timer: "+fmtDuration(m.timerValue)),
+						pausedBox.Render("[PAUSED]"),
+					)
+				} else {
+					timer = lipgloss.JoinHorizontal(
+						lipgloss.Left,
+						spinnerStyle.Render(m.spinner.View()),
+						timerBox.Render("Timer: "+fmtDuration(m.timerValue)),
+					)
 				}
 			}
+
+			return lipgloss.JoinVertical(
+				lipgloss.Top,
+				titleLine,
+				input,
+				timer,
+				msgStyle.Render(m.message),
+				shortcutsHelp,
+			)
 		}
-		msg := ""
-		if m.message != "" {
-			msg = "\n" + msgStyle.Render(m.message)
-		}
-		helpView := m.help.View(m.keys)
-		return lipgloss.JoinVertical(lipgloss.Top,
+
+		return lipgloss.JoinVertical(
+			lipgloss.Top,
 			titleLine,
 			input,
-			"",
-			timer+msg,
-			"",
-			helpView,
+			msgStyle.Render(m.message),
+			shortcutsHelp,
 		)
+
 	case screenConfirmCancel:
-		prompt := headerBar.Render("Cancel timer? Press y to confirm, n to abort.")
-		return prompt
+		return headerBar.Render("Cancel timer? Press y to confirm, n to abort.")
+
 	case screenRecoverTimer:
-		prompt := headerBar.Render(fmt.Sprintf("Found saved timer for %s at %s.", m.savedTimerIssue, fmtDuration(m.savedTimerValue))) +
-			headerBar.Render("Continue from saved time? Press y to continue, n to start fresh.")
-		return prompt
-	case screenLimitedTimer:
-		logo := logoStyle.Render("⏱ unitrack")
-		header := headerBar.Render("Limited Timer Setup")
-		titleLine := lipgloss.JoinHorizontal(lipgloss.Left, logo, header)
-		issueInfo := inputLabel.Render(fmt.Sprintf("Issue: %s", m.pendingIssueID))
-		limitInput := inputBox.Render(inputLabel.Render("Minutes: ") + m.limitInput.View())
-		limitInput = lipgloss.NewStyle().PaddingLeft(1).Render(limitInput)
-		instructions := msgStyle.Render("Enter the number of minutes for the timer limit, then press Enter.")
-		msg := ""
-		if m.message != "" {
-			msg = "\n" + msgStyle.Render(m.message)
+		var timerInfo string
+		if m.savedTimerLimited {
+			limitMinutes := int(m.savedTimerLimit.Minutes())
+			timerInfo = fmt.Sprintf(
+				"Found saved LIMITED timer for %s at %s (limit: %d minutes).",
+				m.savedTimerIssue,
+				fmtDuration(m.savedTimerValue),
+				limitMinutes,
+			)
+		} else {
+			timerInfo = fmt.Sprintf(
+				"Found saved timer for %s at %s.",
+				m.savedTimerIssue,
+				fmtDuration(m.savedTimerValue),
+			)
 		}
-		return lipgloss.JoinVertical(lipgloss.Top,
-			titleLine,
-			issueInfo,
-			limitInput,
-			"",
-			instructions+msg,
+
+		return lipgloss.JoinHorizontal(
+			lipgloss.Top,
+			headerBar.Render(timerInfo),
+			headerBar.Render("Continue from saved time? Press y to continue, n to start fresh."),
+		)
+
+	case screenLimitedTimerSetup:
+		return lipgloss.JoinVertical(
+			lipgloss.Top,
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				logoStyle.Render("⏱ unitrack"),
+				headerBar.Render("Limited Timer Setup"),
+			),
+			inputLabel.Render(fmt.Sprintf("Issue: %s", m.pendingIssueID)),
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				inputLabel.Render("Minutes: "),
+				m.limitInput.View(),
+			),
+			lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				msgStyle.Render("Enter the number of minutes for the timer limit, then press Enter."),
+				msgStyle.Render(m.message),
+			),
 		)
 	}
+
 	return ""
 }
 
@@ -565,6 +690,7 @@ func fmtDuration(d time.Duration) string {
 	h := t / 3600
 	m := (t % 3600) / 60
 	s := t % 60
+
 	return fmt.Sprintf("%02d:%02d:%02d", h, m, s)
 }
 
@@ -573,6 +699,7 @@ func ceilToQuarter(d time.Duration) string {
 	quar := int((tm+14.999)/15) * 15
 	h := quar / 60
 	m := quar % 60
+
 	return fmt.Sprintf("%d:%02d", h, m)
 }
 
@@ -583,30 +710,38 @@ type apiConfig struct {
 }
 
 func postLinearComment(issueId, value string) {
-	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-	b, err := os.ReadFile(cfgPath)
+	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 	if err != nil {
 		logError(fmt.Sprintf("Failed to read config: %v", err))
 		return
 	}
+
 	var cfg apiConfig
 	err = json.Unmarshal(b, &cfg)
 	if err != nil || cfg.APIKey == "" {
 		logError(fmt.Sprintf("Failed to parse config or missing key: %v", err))
 		return
 	}
-	client := resty.New()
+
 	mutation := `mutation CommentCreate { commentCreate(input: { issueId: "` + issueId + `", body: "` + value + `" }) { comment { id } } }`
-	resp, err := client.R().
+	resp, err := resty.New().R().
 		SetHeader("Authorization", cfg.APIKey).
 		SetHeader("Content-Type", "application/json").
 		SetBody(map[string]string{"query": mutation}).
 		Post("https://api.linear.app/graphql")
+
+	if resp == nil {
+		logError("Linear API response is nil")
+		return
+	}
+
 	logError(fmt.Sprintf("Linear API response status: %d, response: %s", resp.StatusCode(), resp.String()))
+
 	if err != nil {
 		logError(fmt.Sprintf("Linear API error: %v", err))
 		return
 	}
+
 	if resp.StatusCode() != 200 {
 		logError(fmt.Sprintf("Linear API returned non-200: %d. Response: %s", resp.StatusCode(), resp.String()))
 	}
@@ -614,22 +749,30 @@ func postLinearComment(issueId, value string) {
 
 func logError(msg string) {
 	logPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.log"
+
 	f, ferr := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if ferr != nil {
-		fmt.Fprintf(os.Stderr, "Could not log error: %v\nOriginal error: %s\n", ferr, msg)
+		_, _ = fmt.Fprintf(os.Stderr, "Could not log error: %v\nOriginal error: %s\n", ferr, msg)
 		return
 	}
-	defer f.Close()
-	f.WriteString(time.Now().Format(time.RFC3339) + " " + msg + "\n")
+	defer func(f *os.File) {
+		err := f.Close()
+		if err != nil {
+			_, _ = fmt.Fprintf(os.Stderr, "Could not close log file: %v\n", err)
+		}
+	}(f)
+
+	_, _ = f.WriteString(time.Now().Format(time.RFC3339) + " " + msg + "\n")
 }
 
 func loadHistory() []string {
-	path := os.Getenv("HOME") + "/.config/unitrack/history"
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/history")
 	if err != nil {
 		return nil
 	}
+
 	lines := strings.Split(string(b), "\n")
+
 	var out []string
 	for _, l := range lines {
 		l = strings.TrimSpace(l)
@@ -637,12 +780,13 @@ func loadHistory() []string {
 			out = append(out, l)
 		}
 	}
+
 	return out
 }
 
 func saveHistory(hist []string) {
-	path := os.Getenv("HOME") + "/.config/unitrack/history"
 	_ = os.MkdirAll(os.Getenv("HOME")+"/.config/unitrack", 0700)
+
 	uniq := make(map[string]bool)
 	var order []string
 	for _, h := range hist {
@@ -651,43 +795,62 @@ func saveHistory(hist []string) {
 			order = append(order, h)
 		}
 	}
-	os.WriteFile(path, []byte(strings.Join(order, "\n")), 0600)
+
+	_ = os.WriteFile(os.Getenv("HOME")+"/.config/unitrack/history", []byte(strings.Join(order, "\n")), 0600)
 }
 
 type savedTimer struct {
-	IssueID     string        `json:"issue_id"`
-	Duration    time.Duration `json:"duration"`
-	StartTime   time.Time     `json:"start_time"`
-	TotalPaused time.Duration `json:"total_paused"`
-	SavedAt     time.Time     `json:"saved_at"`
+	IssueID      string        `json:"issue_id"`
+	Duration     time.Duration `json:"duration"`
+	StartTime    time.Time     `json:"start_time"`
+	TotalPaused  time.Duration `json:"total_paused"`
+	SavedAt      time.Time     `json:"saved_at"`
+	LimitedTimer bool          `json:"limited_timer"`
+	TimerLimit   time.Duration `json:"timer_limit"`
 }
 
-func saveTimer(issueID string, duration time.Duration, startTime time.Time, totalPaused time.Duration) {
+func saveTimer(
+	issueID string,
+	duration time.Duration,
+	startTime time.Time,
+	totalPaused time.Duration,
+	limitedTimer bool,
+	timerLimit time.Duration,
+) {
 	saved := savedTimer{
-		IssueID:     issueID,
-		Duration:    duration,
-		StartTime:   startTime,
-		TotalPaused: totalPaused,
-		SavedAt:     time.Now(),
+		IssueID:      issueID,
+		Duration:     duration,
+		StartTime:    startTime,
+		TotalPaused:  totalPaused,
+		SavedAt:      time.Now(),
+		LimitedTimer: limitedTimer,
+		TimerLimit:   timerLimit,
 	}
-	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
+
 	b, err := json.MarshalIndent(saved, "", "  ")
 	if err != nil {
 		logError(fmt.Sprintf("Failed to marshal saved timer: %v", err))
 		return
 	}
-	err = os.WriteFile(path, b, 0600)
+
+	err = os.WriteFile(
+		os.Getenv("HOME")+"/.config/unitrack/saved_timer_"+strings.ReplaceAll(issueID, "/", "_")+".json",
+		b,
+		0600,
+	)
 	if err != nil {
 		logError(fmt.Sprintf("Failed to save timer: %v", err))
 	}
 }
 
 func loadSavedTimer(issueID string) *savedTimer {
-	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile(
+		os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json",
+	)
 	if err != nil {
 		return nil
 	}
+
 	var saved savedTimer
 	err = json.Unmarshal(b, &saved)
 	if err != nil {
@@ -696,24 +859,27 @@ func loadSavedTimer(issueID string) *savedTimer {
 	}
 
 	expireDays := 5
-	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-	b, err = os.ReadFile(cfgPath)
+
+	b, err = os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 	if err == nil {
 		var cfg apiConfig
 		if json.Unmarshal(b, &cfg) == nil && cfg.TimerExpireDays > 0 {
 			expireDays = cfg.TimerExpireDays
 		}
 	}
+
 	if time.Since(saved.SavedAt) > time.Duration(expireDays)*24*time.Hour {
 		deleteSavedTimer(issueID)
 		return nil
 	}
+
 	return &saved
 }
 
 func deleteSavedTimer(issueID string) {
-	path := os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json"
-	os.Remove(path)
+	_ = os.Remove(
+		os.Getenv("HOME") + "/.config/unitrack/saved_timer_" + strings.ReplaceAll(issueID, "/", "_") + ".json",
+	)
 }
 
 func main() {
@@ -722,20 +888,21 @@ func main() {
 		return
 	}
 
-	cfgPath := os.Getenv("HOME") + "/.config/unitrack/unitrack.json"
-	b, err := os.ReadFile(cfgPath)
 	prefix := "UE"
+	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 	if err == nil {
 		var cfg apiConfig
 		if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
 			prefix = cfg.Prefix
 		}
 	}
+
 	input := textinput.New()
 	input.Placeholder = prefix + "-1234"
 	input.CharLimit = 50
 	input.Width = 20
 	input.Focus()
+
 	helpModel := help.New()
 	helpModel.Styles.ShortKey = lipgloss.NewStyle().Foreground(colorLightGray)
 	helpModel.Styles.ShortDesc = lipgloss.NewStyle().Foreground(colorGray)
@@ -743,28 +910,33 @@ func main() {
 	helpModel.Styles.FullKey = lipgloss.NewStyle().Foreground(colorLightGray)
 	helpModel.Styles.FullDesc = lipgloss.NewStyle().Foreground(colorGray)
 	helpModel.Styles.FullSeparator = lipgloss.NewStyle().Foreground(colorGray)
+
 	spinnerModel := spinner.New()
 	spinnerModel.Spinner = spinner.Dot
 	spinnerModel.Style = lipgloss.NewStyle().Foreground(colorOrange)
+
 	limitInput := textinput.New()
 	limitInput.Placeholder = "15"
 	limitInput.CharLimit = 4
 	limitInput.Width = 10
+
 	progressBar := progress.New(progress.WithDefaultGradient())
 	progressBar.Width = 40
+
 	m := model{
 		input:       input,
-		message:     "",
+		message:     "Enter issue ID and hit 'enter' to start timer or 'l' to set up limited timer.",
 		help:        helpModel,
 		keys:        keys,
 		spinner:     spinnerModel,
 		limitInput:  limitInput,
 		progressBar: progressBar,
 	}
+
 	m.history = loadHistory()
-	p := tea.NewProgram(m)
-	if err := p.Start(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+
+	if _, err = tea.NewProgram(m).Run(); err != nil {
+		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 }

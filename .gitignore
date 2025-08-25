@@ -13,3 +13,4 @@ unitrack_error.log
 
 # OS files
 .DS_Store
+.idea
