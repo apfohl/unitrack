@@ -21,23 +21,49 @@ import (
 var version = "unknown"
 
 var (
-	colorRed       = lipgloss.Color("131") // muted red
-	colorYellow    = lipgloss.Color("143") // muted yellow
-	colorOrange    = lipgloss.Color("166") // orange for spinner
-	colorLightGray = lipgloss.Color("250") // lighter gray for keys
-	colorGray      = lipgloss.Color("245") // gray for descriptions
+	colorRed       lipgloss.Color
+	colorYellow    lipgloss.Color
+	colorOrange    lipgloss.Color
+	colorLightGray lipgloss.Color
+	colorGray      lipgloss.Color
+
+	logoStyle lipgloss.Style
+	headerBar lipgloss.Style
+
+	inputLabel   lipgloss.Style
+	timerBox     lipgloss.Style
+	progressBox  lipgloss.Style
+	spinnerStyle lipgloss.Style
+	pausedBox    lipgloss.Style
+	msgStyle     lipgloss.Style
+	helpStyle    lipgloss.Style
+)
+
+func initializeTheme(theme string) {
+	if theme == "light" {
+		colorRed = lipgloss.Color("124")       // darker red for light backgrounds
+		colorYellow = lipgloss.Color("130")    // darker yellow/orange for light backgrounds
+		colorOrange = lipgloss.Color("208")    // darker orange for spinner
+		colorLightGray = lipgloss.Color("240") // darker gray for keys
+		colorGray = lipgloss.Color("235")      // darker gray for descriptions
+	} else {
+		colorRed = lipgloss.Color("131")       // muted red for dark backgrounds
+		colorYellow = lipgloss.Color("143")    // muted yellow for dark backgrounds
+		colorOrange = lipgloss.Color("166")    // orange for spinner
+		colorLightGray = lipgloss.Color("250") // lighter gray for keys
+		colorGray = lipgloss.Color("245")      // gray for descriptions
+	}
 
 	logoStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 0, 1, 1)
 	headerBar = lipgloss.NewStyle().Bold(true).Padding(1, 1).Padding(1, 0, 1, 2)
-
-	inputLabel   = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).PaddingLeft(1)
-	timerBox     = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).PaddingLeft(1).PaddingTop(1)
-	progressBox  = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
+	inputLabel = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).PaddingLeft(1)
+	timerBox = lipgloss.NewStyle().Foreground(colorYellow).Bold(true).PaddingLeft(1).PaddingTop(1)
+	progressBox = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
 	spinnerStyle = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
-	pausedBox    = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).PaddingLeft(2).PaddingTop(1)
-	msgStyle     = lipgloss.NewStyle().Foreground(colorRed).Italic(true).PaddingLeft(1).PaddingTop(1)
-	helpStyle    = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
-)
+	pausedBox = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).PaddingLeft(2).PaddingTop(1)
+	msgStyle = lipgloss.NewStyle().Foreground(colorRed).Italic(true).PaddingLeft(1).PaddingTop(1)
+	helpStyle = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
+}
 
 type timerMsg time.Duration
 
@@ -151,6 +177,16 @@ type model struct {
 }
 
 func (m model) Init() tea.Cmd {
+	theme := "dark"
+	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
+	if err == nil {
+		var cfg apiConfig
+		if json.Unmarshal(b, &cfg) == nil && cfg.Theme != "" {
+			theme = cfg.Theme
+		}
+	}
+	initializeTheme(theme)
+
 	m.history = loadHistory()
 	m.screen = screenMain
 	m.keys = keys
@@ -708,6 +744,7 @@ type apiConfig struct {
 	APIKey          string `json:"api_key"`
 	Prefix          string `json:"prefix"`
 	TimerExpireDays int    `json:"timer_expire_days,omitempty"`
+	Theme           string `json:"theme,omitempty"`
 }
 
 func postLinearComment(issueId, value string) {
@@ -894,14 +931,21 @@ func main() {
 		return
 	}
 
+	theme := "dark"
 	prefix := "UE"
 	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 	if err == nil {
 		var cfg apiConfig
-		if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
-			prefix = cfg.Prefix
+		if json.Unmarshal(b, &cfg) == nil {
+			if cfg.Theme != "" {
+				theme = cfg.Theme
+			}
+			if cfg.Prefix != "" {
+				prefix = cfg.Prefix
+			}
 		}
 	}
+	initializeTheme(theme)
 
 	input := textinput.New()
 	input.Placeholder = prefix + "-1234"

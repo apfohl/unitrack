@@ -32,6 +32,7 @@ Language: Go (Bubble Tea TUI)
 - Configuration, logs, and binary are all `.gitignore`'d.
 - Bubble Tea, Bubbles, Resty libraries in use. No comments in code unless documenting exported declarations.
 - `--version` flag shows program name and version (e.g., "unitrack v1.1.0" or "unitrack unknown" for local builds).
+- Theme support: Set `"theme": "light"` or `"theme": "dark"` in config for light/dark mode colors (defaults to dark).
 
 ## Misc
 - `.crush/`, `.config/`, `unitrack_error.log`, and all OS/binary artifacts are `.gitignore`'d.

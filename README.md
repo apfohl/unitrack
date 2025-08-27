@@ -24,11 +24,13 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
    {
      "api_key": "YOUR_LINEAR_API_KEY",
      "prefix": "UE",
-     "timer_expire_days": 5
+     "timer_expire_days": 5,
+     "theme": "dark"
    }
    ```
    - `prefix` configures the project key in issue IDs (e.g. "UE-1234").
    - `timer_expire_days` (optional) sets how many days before saved timers expire (default: 5).
+   - `theme` (optional) sets the color scheme: `"dark"` (default) or `"light"` for better readability on light terminal backgrounds.
 
 ## Usage
 
@@ -55,6 +57,25 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
   - You cancel a timer
   - The saved timer is older than the configured expiration (default: 5 days)
 - This feature helps recover from crashes or accidental closures
+
+### Theme Configuration
+
+unitrack supports both light and dark color themes to provide optimal readability in different terminal environments:
+
+- **Dark theme** (default): Uses muted, lighter colors optimized for dark terminal backgrounds
+- **Light theme**: Uses darker, higher-contrast colors optimized for light terminal backgrounds
+
+Configure the theme in your `~/.config/unitrack/unitrack.json`:
+
+```json
+{
+  "api_key": "YOUR_LINEAR_API_KEY",
+  "prefix": "UE",
+  "theme": "light"
+}
+```
+
+If no theme is specified, unitrack defaults to the dark theme.
 
 ### Notes
 - Customize the prefix for issue IDs in the config (e.g. "UI" for UI-1234).

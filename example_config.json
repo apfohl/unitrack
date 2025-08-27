@@ -1,0 +1,6 @@
+{
+  "api_key": "your_linear_api_key_here",
+  "prefix": "UE",
+  "timer_expire_days": 5,
+  "theme": "dark"
+}
