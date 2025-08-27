@@ -340,6 +340,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					go postLinearComment(issueId, ceiled)
 
+					m.history = loadHistory()
 					m.input.SetValue("")
 					m.input.Focus()
 
@@ -429,6 +430,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					deleteSavedTimer(issueId)
 					go postLinearComment(issueId, ceiled)
 					go showTimerNotification(issueId, ceiled)
+					m.history = loadHistory()
 					m.input.SetValue("")
 					m.input.Focus()
 
