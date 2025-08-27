@@ -392,6 +392,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					logError(logEntry)
 					deleteSavedTimer(issueId)
 					go postLinearComment(issueId, ceiled)
+					go showTimerNotification(issueId, ceiled)
 					m.input.SetValue("")
 					m.input.Focus()
 
@@ -745,6 +746,11 @@ func postLinearComment(issueId, value string) {
 	if resp.StatusCode() != 200 {
 		logError(fmt.Sprintf("Linear API returned non-200: %d. Response: %s", resp.StatusCode(), resp.String()))
 	}
+}
+
+func showTimerNotification(issueId, timeValue string) {
+	msg := fmt.Sprintf("Timer for %s completed. Time logged: %s", issueId, timeValue)
+	fmt.Printf("\x1b]9;%s\x1b\\", msg)
 }
 
 func logError(msg string) {
