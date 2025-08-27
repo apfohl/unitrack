@@ -974,7 +974,7 @@ func main() {
 
 	m.history = loadHistory()
 
-	if _, err = tea.NewProgram(m).Run(); err != nil {
+	if _, err = tea.NewProgram(m, tea.WithAltScreen()).Run(); err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
