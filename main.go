@@ -443,11 +443,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.lastSaveTime = time.Now()
 				}
 
-				if m.limitedTimer {
-					return m, tickTimer()
-				} else {
-					return m, tea.Batch(tickTimer(), m.spinner.Tick)
-				}
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
 		}
 
@@ -479,11 +475,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenMain
 				m.message = "Cancel aborted."
 
-				if m.limitedTimer {
-					return m, tickTimer()
-				} else {
-					return m, tea.Batch(tickTimer(), m.spinner.Tick)
-				}
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
 		}
 
@@ -505,11 +497,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenMain
 				m.lastSaveTime = time.Now()
 
-				if m.limitedTimer {
-					return m, tickTimer()
-				} else {
-					return m, tea.Batch(tickTimer(), m.spinner.Tick)
-				}
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			} else if message.String() == "n" {
 				deleteSavedTimer(m.savedTimerIssue)
 				m.timerActive = true
@@ -566,8 +554,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.totalPaused = 0
 				m.message = fmt.Sprintf("Limited timer started for %d minutes", minutes)
 				m.screen = screenMain
-				m.lastSaveTime = time.Now()
-				return m, tickTimer()
+				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 
 			case "ctrl+c", "q", "esc":
 				m.screen = screenMain
