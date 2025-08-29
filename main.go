@@ -167,23 +167,21 @@ type model struct {
 	keys         keyMap
 	spinner      spinner.Model
 
-	// For timer recovery
 	savedTimerIssue   string
 	savedTimerValue   time.Duration
 	savedTimerLimited bool
 	savedTimerLimit   time.Duration
 	lastSaveTime      time.Time
 
-	// For limited timer
 	limitedTimer   bool
 	timerLimit     time.Duration
 	limitInput     textinput.Model
 	progressBar    progress.Model
 	pendingIssueID string
 
-	// Issue title
 	issueTitle     string
 	lastInputValue string
+	titleCache     map[string]string
 }
 
 func (m model) Init() tea.Cmd {
@@ -486,7 +484,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 
 				if fullId != "" && len(fullId) > len(prefix+"-") {
-					fetchCmd := fetchIssueTitleCmd(fullId)
+					fetchCmd := fetchIssueTitleCmd(fullId, m.titleCache)
 					cmd = tea.Batch(cmd, fetchCmd)
 				} else {
 					m.issueTitle = ""
@@ -757,9 +755,9 @@ func tickTimer() tea.Cmd {
 	})
 }
 
-func fetchIssueTitleCmd(issueId string) tea.Cmd {
+func fetchIssueTitleCmd(issueId string, cache map[string]string) tea.Cmd {
 	return func() tea.Msg {
-		return issueTitleMsg{title: fetchIssueTitle(issueId)}
+		return issueTitleMsg{title: fetchIssueTitle(issueId, cache)}
 	}
 }
 
@@ -825,7 +823,11 @@ func postLinearComment(issueId, value string) {
 	}
 }
 
-func fetchIssueTitle(issueId string) string {
+func fetchIssueTitle(issueId string, cache map[string]string) string {
+	if cachedTitle, exists := cache[issueId]; exists {
+		return cachedTitle
+	}
+
 	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 	if err != nil {
 		logError(fmt.Sprintf("Failed to read config: %v", err))
@@ -860,27 +862,27 @@ func fetchIssueTitle(issueId string) string {
 
 	data, ok := result["data"].(map[string]interface{})
 	if !ok {
-		logError("Linear API response missing data")
+		logError("Linear API response does not contain data")
 		return ""
 	}
 
 	issue, ok := data["issue"].(map[string]interface{})
 	if !ok {
-		logError("Linear API response missing issue")
+		logError("Linear API response does not contain issue")
 		return ""
 	}
 
 	title, ok := issue["title"].(string)
 	if !ok {
-		logError("Linear API response missing issue title")
+		logError("Linear API response does not contain issue title")
 		return ""
 	}
 
-	logError(fmt.Sprintf("Fetched issue title: %s", title))
-
-	if len(title) > 60 {
-		title = fmt.Sprintf("%s...", title[:57])
+	if len(title) > 55 {
+		title = fmt.Sprintf("%s...", title[:52])
 	}
+
+	cache[issueId] = title
 
 	return title
 }
@@ -1081,6 +1083,7 @@ func main() {
 		spinner:     spinnerModel,
 		limitInput:  limitInput,
 		progressBar: progressBar,
+		titleCache:  make(map[string]string),
 	}
 
 	m.history = loadHistory()
