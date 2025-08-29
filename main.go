@@ -37,21 +37,22 @@ var (
 	pausedBox    lipgloss.Style
 	msgStyle     lipgloss.Style
 	helpStyle    lipgloss.Style
+	titleStyle   lipgloss.Style
 )
 
 func initializeTheme(theme string) {
 	if theme == "light" {
-		colorRed = lipgloss.Color("124")       // darker red for light backgrounds
-		colorYellow = lipgloss.Color("130")    // darker yellow/orange for light backgrounds
-		colorOrange = lipgloss.Color("208")    // darker orange for spinner
-		colorLightGray = lipgloss.Color("240") // darker gray for keys
-		colorGray = lipgloss.Color("235")      // darker gray for descriptions
+		colorRed = "124"       // darker red for light backgrounds
+		colorYellow = "130"    // darker yellow/orange for light backgrounds
+		colorOrange = "208"    // darker orange for spinner
+		colorLightGray = "240" // darker gray for keys
+		colorGray = "235"      // darker gray for descriptions
 	} else {
-		colorRed = lipgloss.Color("131")       // muted red for dark backgrounds
-		colorYellow = lipgloss.Color("143")    // muted yellow for dark backgrounds
-		colorOrange = lipgloss.Color("166")    // orange for spinner
-		colorLightGray = lipgloss.Color("250") // lighter gray for keys
-		colorGray = lipgloss.Color("245")      // gray for descriptions
+		colorRed = "131"       // muted red for dark backgrounds
+		colorYellow = "143"    // muted yellow for dark backgrounds
+		colorOrange = "166"    // orange for spinner
+		colorLightGray = "250" // lighter gray for keys
+		colorGray = "245"      // gray for descriptions
 	}
 
 	logoStyle = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Padding(1, 0, 1, 1)
@@ -63,9 +64,14 @@ func initializeTheme(theme string) {
 	pausedBox = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).PaddingLeft(2).PaddingTop(1)
 	msgStyle = lipgloss.NewStyle().Foreground(colorRed).Italic(true).PaddingLeft(1).PaddingTop(1)
 	helpStyle = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
+	titleStyle = lipgloss.NewStyle().Foreground(colorGray).PaddingLeft(1)
 }
 
 type timerMsg time.Duration
+
+type issueTitleMsg struct {
+	title string
+}
 
 type screen int
 
@@ -174,6 +180,10 @@ type model struct {
 	limitInput     textinput.Model
 	progressBar    progress.Model
 	pendingIssueID string
+
+	// Issue title
+	issueTitle     string
+	lastInputValue string
 }
 
 func (m model) Init() tea.Cmd {
@@ -342,6 +352,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 					m.history = loadHistory()
 					m.input.SetValue("")
+					m.issueTitle = ""
 					m.input.Focus()
 
 					return m, textinput.Blink
@@ -432,6 +443,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					go showTimerNotification(issueId, ceiled)
 					m.history = loadHistory()
 					m.input.SetValue("")
+					m.issueTitle = ""
 					m.input.Focus()
 
 					return m, textinput.Blink
@@ -445,11 +457,44 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 				return m, tea.Batch(tickTimer(), m.spinner.Tick)
 			}
+
+		case issueTitleMsg:
+			m.issueTitle = message.title
+			return m, nil
 		}
 
+		// Handle input updates and check for changes
 		var cmd tea.Cmd
 		if !m.timerActive {
 			m.input, cmd = m.input.Update(msg)
+
+			// Check if input value changed
+			currentValue := m.input.Value()
+			if currentValue != m.lastInputValue {
+				m.lastInputValue = currentValue
+
+				// Process the new value to fetch title
+				b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
+				prefix := "UE"
+				if err == nil {
+					var cfg apiConfig
+					if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+						prefix = cfg.Prefix
+					}
+				}
+
+				fullId := currentValue
+				if !strings.HasPrefix(currentValue, prefix+"-") && currentValue != "" {
+					fullId = prefix + "-" + currentValue
+				}
+
+				if fullId != "" && len(fullId) > len(prefix+"-") {
+					fetchCmd := fetchIssueTitleCmd(fullId)
+					cmd = tea.Batch(cmd, fetchCmd)
+				} else {
+					m.issueTitle = ""
+				}
+			}
 		}
 		m.spinner, _ = m.spinner.Update(msg)
 
@@ -468,6 +513,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.screen = screenMain
 				m.message = "Timer cancelled."
 				m.input.SetValue("")
+				m.issueTitle = ""
 				m.input.Focus()
 
 				return m, textinput.Blink
@@ -586,6 +632,10 @@ func (m model) View() string {
 			inputLabel.Render("Issue ID: "),
 			m.input.View(),
 		)
+		var titleDisplay string
+		if m.issueTitle != "" {
+			titleDisplay = titleStyle.Render(m.issueTitle)
+		}
 		shortcutsHelp := helpStyle.Render(m.help.View(keys))
 
 		var timer string
@@ -635,23 +685,24 @@ func (m model) View() string {
 				}
 			}
 
-			return lipgloss.JoinVertical(
-				lipgloss.Top,
-				titleLine,
-				input,
-				timer,
-				msgStyle.Render(m.message),
-				shortcutsHelp,
-			)
+			var viewElements []string
+			viewElements = append(viewElements, titleLine, input)
+			if titleDisplay != "" {
+				viewElements = append(viewElements, titleDisplay)
+			}
+			viewElements = append(viewElements, timer, msgStyle.Render(m.message), shortcutsHelp)
+
+			return lipgloss.JoinVertical(lipgloss.Top, viewElements...)
 		}
 
-		return lipgloss.JoinVertical(
-			lipgloss.Top,
-			titleLine,
-			input,
-			msgStyle.Render(m.message),
-			shortcutsHelp,
-		)
+		var viewElements []string
+		viewElements = append(viewElements, titleLine, input)
+		if titleDisplay != "" {
+			viewElements = append(viewElements, titleDisplay)
+		}
+		viewElements = append(viewElements, msgStyle.Render(m.message), shortcutsHelp)
+
+		return lipgloss.JoinVertical(lipgloss.Top, viewElements...)
 
 	case screenConfirmCancel:
 		return headerBar.Render("Cancel timer? Press y to confirm, n to abort.")
@@ -711,6 +762,12 @@ func tickTimer() tea.Cmd {
 	})
 }
 
+func fetchIssueTitleCmd(issueId string) tea.Cmd {
+	return func() tea.Msg {
+		return issueTitleMsg{title: fetchIssueTitle(issueId)}
+	}
+}
+
 func fmtDuration(d time.Duration) string {
 	t := int(d.Seconds())
 	h := t / 3600
@@ -756,7 +813,6 @@ func postLinearComment(issueId, value string) {
 		SetHeader("Content-Type", "application/json").
 		SetBody(map[string]string{"query": mutation}).
 		Post("https://api.linear.app/graphql")
-
 	if resp == nil {
 		logError("Linear API response is nil")
 		return
@@ -772,6 +828,66 @@ func postLinearComment(issueId, value string) {
 	if resp.StatusCode() != 200 {
 		logError(fmt.Sprintf("Linear API returned non-200: %d. Response: %s", resp.StatusCode(), resp.String()))
 	}
+}
+
+func fetchIssueTitle(issueId string) string {
+	b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
+	if err != nil {
+		logError(fmt.Sprintf("Failed to read config: %v", err))
+		return ""
+	}
+
+	var cfg apiConfig
+	err = json.Unmarshal(b, &cfg)
+	if err != nil || cfg.APIKey == "" {
+		logError(fmt.Sprintf("Failed to parse config or missing key: %v", err))
+		return ""
+	}
+
+	query := `query { issue(id: "` + issueId + `") { title } }`
+	resp, err := resty.New().R().
+		SetHeader("Authorization", cfg.APIKey).
+		SetHeader("Content-Type", "application/json").
+		SetBody(map[string]string{"query": query}).
+		Post("https://api.linear.app/graphql")
+	if err != nil || resp == nil || resp.StatusCode() != 200 {
+		logError(fmt.Sprintf("Linear API error: %v", err))
+		return ""
+	}
+
+	logError(fmt.Sprintf("Linear API response status: %d, response: %s", resp.StatusCode(), resp.String()))
+
+	var result map[string]interface{}
+	if err = json.Unmarshal(resp.Body(), &result); err != nil {
+		logError(fmt.Sprintf("Failed to parse Linear API response: %v", err))
+		return ""
+	}
+
+	data, ok := result["data"].(map[string]interface{})
+	if !ok {
+		logError("Linear API response missing data")
+		return ""
+	}
+
+	issue, ok := data["issue"].(map[string]interface{})
+	if !ok {
+		logError("Linear API response missing issue")
+		return ""
+	}
+
+	title, ok := issue["title"].(string)
+	if !ok {
+		logError("Linear API response missing issue title")
+		return ""
+	}
+
+	logError(fmt.Sprintf("Fetched issue title: %s", title))
+
+	if len(title) > 40 {
+		title = fmt.Sprintf("%s...", title[:37])
+	}
+
+	return title
 }
 
 func showTimerNotification(issueId, timeValue string) {
