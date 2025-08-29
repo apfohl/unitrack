@@ -878,8 +878,8 @@ func fetchIssueTitle(issueId string, cache map[string]string) string {
 		return ""
 	}
 
-	if len(title) > 55 {
-		title = fmt.Sprintf("%s...", title[:52])
+	if len(title) > 70 {
+		title = fmt.Sprintf("%s...", title[:67])
 	}
 
 	cache[issueId] = title
