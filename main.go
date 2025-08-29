@@ -64,7 +64,7 @@ func initializeTheme(theme string) {
 	pausedBox = lipgloss.NewStyle().Foreground(colorRed).Bold(true).Underline(true).PaddingLeft(2).PaddingTop(1)
 	msgStyle = lipgloss.NewStyle().Foreground(colorRed).Italic(true).PaddingLeft(1).PaddingTop(1)
 	helpStyle = lipgloss.NewStyle().PaddingLeft(1).PaddingTop(1)
-	titleStyle = lipgloss.NewStyle().Foreground(colorGray).PaddingLeft(1)
+	titleStyle = lipgloss.NewStyle().Foreground(colorGray)
 }
 
 type timerMsg time.Duration
@@ -463,17 +463,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle input updates and check for changes
 		var cmd tea.Cmd
 		if !m.timerActive {
 			m.input, cmd = m.input.Update(msg)
 
-			// Check if input value changed
 			currentValue := m.input.Value()
 			if currentValue != m.lastInputValue {
 				m.lastInputValue = currentValue
 
-				// Process the new value to fetch title
 				b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
 				prefix := "UE"
 				if err == nil {
@@ -632,9 +629,13 @@ func (m model) View() string {
 			inputLabel.Render("Issue ID: "),
 			m.input.View(),
 		)
-		var titleDisplay string
 		if m.issueTitle != "" {
-			titleDisplay = titleStyle.Render(m.issueTitle)
+			input = lipgloss.JoinHorizontal(
+				lipgloss.Left,
+				inputLabel.Render("Issue ID: "),
+				m.input.View(),
+				titleStyle.Render(m.issueTitle),
+			)
 		}
 		shortcutsHelp := helpStyle.Render(m.help.View(keys))
 
@@ -687,9 +688,6 @@ func (m model) View() string {
 
 			var viewElements []string
 			viewElements = append(viewElements, titleLine, input)
-			if titleDisplay != "" {
-				viewElements = append(viewElements, titleDisplay)
-			}
 			viewElements = append(viewElements, timer, msgStyle.Render(m.message), shortcutsHelp)
 
 			return lipgloss.JoinVertical(lipgloss.Top, viewElements...)
@@ -697,9 +695,6 @@ func (m model) View() string {
 
 		var viewElements []string
 		viewElements = append(viewElements, titleLine, input)
-		if titleDisplay != "" {
-			viewElements = append(viewElements, titleDisplay)
-		}
 		viewElements = append(viewElements, msgStyle.Render(m.message), shortcutsHelp)
 
 		return lipgloss.JoinVertical(lipgloss.Top, viewElements...)
@@ -883,8 +878,8 @@ func fetchIssueTitle(issueId string) string {
 
 	logError(fmt.Sprintf("Fetched issue title: %s", title))
 
-	if len(title) > 40 {
-		title = fmt.Sprintf("%s...", title[:37])
+	if len(title) > 60 {
+		title = fmt.Sprintf("%s...", title[:57])
 	}
 
 	return title
@@ -1054,8 +1049,8 @@ func main() {
 
 	input := textinput.New()
 	input.Placeholder = prefix + "-1234"
-	input.CharLimit = 50
-	input.Width = 20
+	input.CharLimit = 10
+	input.Width = 8
 	input.Focus()
 
 	helpModel := help.New()
