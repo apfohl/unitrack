@@ -93,6 +93,8 @@ type keyMap struct {
 	Down         key.Binding
 	Help         key.Binding
 	LimitedTimer key.Binding
+	AddTime      key.Binding
+	SubTime      key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -102,7 +104,8 @@ func (k keyMap) ShortHelp() []key.Binding {
 func (k keyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
 		{k.Start, k.LimitedTimer, k.Submit, k.Pause, k.Resume},
-		{k.Cancel, k.Up, k.Down, k.Help, k.Quit},
+		{k.Cancel, k.AddTime, k.SubTime, k.Up, k.Down},
+		{k.Help, k.Quit},
 	}
 }
 
@@ -146,6 +149,14 @@ var keys = keyMap{
 	LimitedTimer: key.NewBinding(
 		key.WithKeys("l"),
 		key.WithHelp("l", "limited timer"),
+	),
+	AddTime: key.NewBinding(
+		key.WithKeys("+"),
+		key.WithHelp("+", "add 15 min"),
+	),
+	SubTime: key.NewBinding(
+		key.WithKeys("-"),
+		key.WithHelp("-", "sub 15 min"),
 	),
 }
 
@@ -359,6 +370,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "c":
 				if m.timerActive {
 					m.screen = screenConfirmCancel
+					return m, nil
+				}
+
+			case "+":
+				if m.timerActive {
+					fifteenMinutes := 15 * time.Minute
+					if m.limitedTimer {
+						timeRemaining := m.timerLimit - m.timerValue
+						if timeRemaining < fifteenMinutes {
+							m.message = "Cannot add 15 minutes: less than 15 minutes remaining on limited timer."
+							return m, nil
+						}
+					}
+					m.timerStart = m.timerStart.Add(-fifteenMinutes)
+					m.timerValue += fifteenMinutes
+					m.message = "Added 15 minutes to timer."
+					return m, nil
+				}
+
+			case "-":
+				if m.timerActive {
+					fifteenMinutes := 15 * time.Minute
+					if m.timerValue >= fifteenMinutes {
+						m.timerStart = m.timerStart.Add(fifteenMinutes)
+						m.timerValue -= fifteenMinutes
+						m.message = "Subtracted 15 minutes from timer."
+					} else {
+						m.message = "Cannot subtract 15 minutes: timer would go below 15 minutes."
+					}
 					return m, nil
 				}
 

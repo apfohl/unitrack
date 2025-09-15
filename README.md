@@ -66,6 +66,10 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
 - Press `Enter` to start the timer for the issue
 - The timer runs and shows elapsed time (hh:mm:ss)
 - Press `p` to pause, `r` to resume the timer
+- **Quick Time Adjustment**: While the timer is running:
+  - Press `+` to add 15 minutes to the timer
+  - Press `-` to subtract 15 minutes from the timer (only if timer has at least 15 minutes)
+  - For limited timers, `+` only works if there are more than 15 minutes remaining
 - Press `c` to cancel (you'll get a y/n confirmation)
 - Press `s` to stop, round to nearest quarter hour, and post as a comment to Linear
 - Previous full issue IDs are saved in history; cycle them with `Up`/`Down` arrows
