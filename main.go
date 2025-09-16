@@ -69,6 +69,10 @@ func initializeTheme(theme string) {
 
 type timerMsg time.Duration
 
+type debounceTimerMsg struct {
+	inputValue string
+}
+
 type issueTitleMsg struct {
 	title string
 }
@@ -190,9 +194,11 @@ type model struct {
 	progressBar    progress.Model
 	pendingIssueID string
 
-	issueTitle     string
-	lastInputValue string
-	titleCache     map[string]string
+	issueTitle       string
+	lastInputValue   string
+	titleCache       map[string]string
+	debounceTimer    *time.Timer
+	debounceDuration time.Duration
 }
 
 func (m model) Init() tea.Cmd {
@@ -209,6 +215,7 @@ func (m model) Init() tea.Cmd {
 	m.history = loadHistory()
 	m.screen = screenMain
 	m.keys = keys
+	m.debounceDuration = 500 * time.Millisecond
 
 	m.help = help.New()
 	m.help.Styles.ShortKey = lipgloss.NewStyle().Foreground(colorLightGray)
@@ -499,6 +506,30 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case issueTitleMsg:
 			m.issueTitle = message.title
 			return m, nil
+
+		case debounceTimerMsg:
+			if message.inputValue == m.input.Value() {
+				b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
+				prefix := "UE"
+				if err == nil {
+					var cfg apiConfig
+					if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
+						prefix = cfg.Prefix
+					}
+				}
+
+				fullId := message.inputValue
+				if !strings.HasPrefix(message.inputValue, prefix+"-") && message.inputValue != "" {
+					fullId = prefix + "-" + message.inputValue
+				}
+
+				if fullId != "" && len(fullId) > len(prefix+"-") {
+					return m, fetchIssueTitleCmd(fullId, m.titleCache)
+				} else {
+					m.issueTitle = ""
+				}
+			}
+			return m, nil
 		}
 
 		var cmd tea.Cmd
@@ -509,26 +540,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if currentValue != m.lastInputValue {
 				m.lastInputValue = currentValue
 
-				b, err := os.ReadFile(os.Getenv("HOME") + "/.config/unitrack/unitrack.json")
-				prefix := "UE"
-				if err == nil {
-					var cfg apiConfig
-					if json.Unmarshal(b, &cfg) == nil && cfg.Prefix != "" {
-						prefix = cfg.Prefix
-					}
+				if m.debounceTimer != nil {
+					m.debounceTimer.Stop()
 				}
 
-				fullId := currentValue
-				if !strings.HasPrefix(currentValue, prefix+"-") && currentValue != "" {
-					fullId = prefix + "-" + currentValue
+				m.debounceTimer = time.NewTimer(m.debounceDuration)
+				debounceCmd := func() tea.Msg {
+					<-m.debounceTimer.C
+					return debounceTimerMsg{inputValue: currentValue}
 				}
-
-				if fullId != "" && len(fullId) > len(prefix+"-") {
-					fetchCmd := fetchIssueTitleCmd(fullId, m.titleCache)
-					cmd = tea.Batch(cmd, fetchCmd)
-				} else {
-					m.issueTitle = ""
-				}
+				cmd = tea.Batch(cmd, debounceCmd)
 			}
 		}
 		m.spinner, _ = m.spinner.Update(msg)
