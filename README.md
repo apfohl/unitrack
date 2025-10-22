@@ -17,7 +17,7 @@ A Bubble Tea TUI to track time per Linear issue, rounding to the next quarter ho
 
 1. **Recommended:** Install via Go:
    ```shell
-   go install github.com/apfohl-uninow/unitrack@latest
+   go install github.com/apfohl/unitrack@latest
    ```
    The binary will be available as `unitrack` in your `$GOPATH/bin` (usually `~/go/bin`).
 
@@ -153,11 +153,11 @@ Common error: `"Invalid scope: 'read' required"` means your API key needs the `R
 - **Install stable releases with:**
 
   ```shell
-  go install github.com/apfohl-uninow/unitrack@latest
+  go install github.com/apfohl/unitrack@latest
   ```
 
 - **Or install by specific tag:**
 
   ```shell
-  go install github.com/apfohl-uninow/unitrack@v0.1.0
+  go install github.com/apfohl/unitrack@v0.1.0
   ```
